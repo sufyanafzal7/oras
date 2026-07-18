@@ -1,13 +1,50 @@
-import 'package:flutter/foundation.dart';
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'dart:async';
-import '../services/api_service.dart';
-import '../theme/app_constants.dart';
-import '../widgets/phase_timeline_widget.dart';
-import '../widgets/tool_badge_widget.dart';
-import '../widgets/confidence_gauge_widget.dart';
 
+import '../services/api_service.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_constants.dart';
+import '../widgets/confidence_gauge_widget.dart';
+import '../widgets/tool_badge_widget.dart';
+
+// Cross-platform video controller — no dart:html in this file
+import 'video_controller.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Data models
+// ─────────────────────────────────────────────────────────────────────────────
+class _PhaseSegment {
+  final String phase;
+  final double startTime;
+  final double endTime;
+  const _PhaseSegment({
+    required this.phase,
+    required this.startTime,
+    required this.endTime,
+  });
+  double get duration => (endTime - startTime).clamp(0.0, double.infinity);
+}
+
+class _ToolOccurrence {
+  final String tool;
+  final double startTime;
+  final double endTime;
+  const _ToolOccurrence({
+    required this.tool,
+    required this.startTime,
+    required this.endTime,
+  });
+  double get duration => (endTime - startTime).clamp(0.0, double.infinity);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AnalysisScreen
+// ─────────────────────────────────────────────────────────────────────────────
 class AnalysisScreen extends StatefulWidget {
   const AnalysisScreen({super.key});
 
@@ -18,92 +55,179 @@ class AnalysisScreen extends StatefulWidget {
 class _AnalysisScreenState extends State<AnalysisScreen>
     with TickerProviderStateMixin {
 
-  // ── State ─────────────────────────────────────────────────────────────────
+  // ── Upload / polling ───────────────────────────────────────────────────────
   PlatformFile? _selectedFile;
-  String?  _currentJobId;
-  bool     _isAnalyzing  = false;
-  bool     _isConnected  = false;
-  double   _progress     = 0.0;
-  String   _statusMsg    = 'Select a video to begin analysis';
-
-  // Last completed result
-  String       _currentPhase    = '—';
-  double       _phaseConfidence = 0.0;
-  List<String> _activeTools     = [];
-  List<Map<String, dynamic>> _timeline = [];
-
+  bool          _isAnalyzing      = false;
+  bool          _isConnected      = false;
+  double        _progress         = 0.0;
+  String        _statusMsg        = 'Select a video to begin analysis';
+  String        _etaString        = '';
+  DateTime?     _analysisStartTime;
   StreamSubscription<Map<String, dynamic>>? _pollSub;
 
-  late AnimationController _pulseController;
-  late Animation<double>   _pulseAnimation;
+  // ── Results ────────────────────────────────────────────────────────────────
+  List<_PhaseSegment>   _segments        = [];
+  List<_ToolOccurrence> _toolOccurrences = [];
+  List<String>          _activeTools     = [];
+  double                _totalDuration   = 0.0;
+  String                _currentPhase    = '—';
+  double                _phaseConf       = 0.0;
 
-  DateTime? _analysisStartTime;
-  String    _etaString = '';
+  // ── Playhead ───────────────────────────────────────────────────────────────
+  final ValueNotifier<double> _playhead = ValueNotifier(0.0);
+  bool _videoReady = false;
+  bool _isPlaying  = false;
+  int? _highlightedPhase;
+  int? _highlightedTool;
 
+  // ── Video controller ──────────────────────────────────────────────────────
+  late final VideoController _video;
+  final String _videoViewId =
+      'oras-video-${DateTime.now().millisecondsSinceEpoch}';
+
+  // ── Resizable columns ─────────────────────────────────────────────────────
+  static const double _minFrac = 0.14;
+  static const double _maxFrac = 0.45;
+  double _leftFrac  = 0.21;
+  double _rightFrac = 0.21;
+
+  // ── Pulse animation ────────────────────────────────────────────────────────
+  late AnimationController _pulseCtrl;
+  late Animation<double>   _pulseAnim;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Lifecycle
+  // ─────────────────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
-    _pulseController = AnimationController(
+    _pulseCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat(reverse: true);
-    _pulseAnimation = Tween<double>(begin: 0.6, end: 1.0)
-        .animate(CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut));
+    _pulseAnim = Tween<double>(begin: 0.6, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
+    );
+
+    _video = VideoController(viewId: _videoViewId);
+    if (kIsWeb) {
+      _video.init(
+        onTimeUpdate: _onVideoTimeUpdate,
+        onEnded: () { if (mounted) setState(() => _isPlaying = false); },
+        onCanPlay: () { if (mounted) setState(() => _videoReady = true); },
+      );
+    }
     _checkConnection();
   }
 
   @override
   void dispose() {
-    _pulseController.dispose();
+    _pulseCtrl.dispose();
     _pollSub?.cancel();
+    _playhead.dispose();
+    _video.dispose();
     super.dispose();
   }
 
-  // ── Backend check ─────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // Video callbacks
+  // ─────────────────────────────────────────────────────────────────────────
+  void _onVideoTimeUpdate() {
+    if (!mounted) return;
+    final t = _video.currentTime;
+    _playhead.value = t;
+    _syncHighlights(t);
+  }
+
+  void _syncHighlights(double t) {
+    int? pi;
+    for (int i = 0; i < _segments.length; i++) {
+      if (t >= _segments[i].startTime && t < _segments[i].endTime) {
+        pi = i;
+        break;
+      }
+    }
+    int? ti;
+    for (int i = 0; i < _toolOccurrences.length; i++) {
+      if (t >= _toolOccurrences[i].startTime &&
+          t < _toolOccurrences[i].endTime) {
+        ti = i;
+        break;
+      }
+    }
+    if (pi != _highlightedPhase || ti != _highlightedTool) {
+      if (mounted) setState(() { _highlightedPhase = pi; _highlightedTool = ti; });
+    }
+  }
+
+  void _seekTo(double seconds) {
+    final double t = seconds.clamp(0.0, math.max(_totalDuration, 1.0));
+    _playhead.value = t;
+    _video.seekTo(t);
+    _syncHighlights(t);
+  }
+
+  void _togglePlay() {
+    if (_isPlaying) {
+      _video.pause();
+    } else {
+      _video.play();
+    }
+    setState(() => _isPlaying = !_isPlaying);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Backend
+  // ─────────────────────────────────────────────────────────────────────────
   Future<void> _checkConnection() async {
     final alive = await ApiService.isBackendAlive();
     if (mounted) setState(() => _isConnected = alive);
   }
 
-  // ── Pick video ────────────────────────────────────────────────────────────
   Future<void> _pickVideo() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.video,
       allowMultiple: false,
-      withData: kIsWeb,       // load bytes into memory only on web
-      withReadStream: false,
+      withData: kIsWeb,
     );
-    if (result != null) {
-      setState(() {
-        _selectedFile    = result.files.single;
-        _statusMsg       = 'Loaded: ${_selectedFile!.name}';
-        _timeline.clear();
-        _currentPhase    = '—';
-        _phaseConfidence = 0.0;
-        _activeTools     = [];
-        _progress        = 0.0;
-      });
-    }
+    if (result == null) return;
+    final file = result.files.single;
+    if (kIsWeb) _video.loadFile(file);
+    setState(() {
+      _selectedFile     = file;
+      _statusMsg        = 'Loaded: ${file.name}';
+      _segments         = [];
+      _toolOccurrences  = [];
+      _activeTools      = [];
+      _currentPhase     = '—';
+      _phaseConf        = 0.0;
+      _totalDuration    = 0.0;
+      _progress         = 0.0;
+      _videoReady       = false;
+      _isPlaying        = false;
+      _highlightedPhase = null;
+      _highlightedTool  = null;
+    });
+    _playhead.value = 0.0;
   }
 
-  // ── Submit + poll ─────────────────────────────────────────────────────────
   Future<void> _startAnalysis() async {
     if (_selectedFile == null) return;
     setState(() {
-      _isAnalyzing      = true;
-      _statusMsg        = 'Uploading video…';
-      _timeline.clear();
-      _progress         = 0.0;
-      _etaString        = '';
-      _analysisStartTime = null;   // reset
+      _isAnalyzing       = true;
+      _statusMsg         = 'Uploading video…';
+      _segments          = [];
+      _toolOccurrences   = [];
+      _activeTools       = [];
+      _progress          = 0.0;
+      _etaString         = '';
+      _analysisStartTime = null;
     });
+    _playhead.value = 0.0;
 
     try {
       final jobId = await ApiService.submitVideo(_selectedFile!);
-      setState(() {
-        _currentJobId = jobId;
-        _statusMsg    = 'Processing…';
-      });
+      setState(() => _statusMsg = 'Processing…');
       _pollSub = ApiService.pollUntilDone(jobId).listen(
         _handleUpdate,
         onError: (e) => _setError('Polling error: $e'),
@@ -113,239 +237,297 @@ class _AnalysisScreenState extends State<AnalysisScreen>
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Progressive result handler
+  // ─────────────────────────────────────────────────────────────────────────
   void _handleUpdate(Map<String, dynamic> data) {
     if (!mounted) return;
-
     setState(() {
-      final newProgress =
+      final newProg =
           (data['progress'] as num?)?.toDouble() ?? _progress;
 
-      // Start timing once real progress begins
-      if (newProgress > 0.0 && _analysisStartTime == null) {
+      // ETA calculation
+      if (newProg > 0.0 && _analysisStartTime == null) {
         _analysisStartTime = DateTime.now();
       }
-
-      // Estimate remaining time
-      if (_analysisStartTime != null && newProgress > 0.01) {
-        final elapsed =
+      if (_analysisStartTime != null && newProg > 0.01) {
+        final elapsed  =
             DateTime.now().difference(_analysisStartTime!).inSeconds;
-
-        final totalEstimated = elapsed / newProgress;
-        final remaining =
-        (totalEstimated - elapsed).clamp(0, double.infinity).toInt();
-
-        if (remaining < 60) {
-          _etaString = 'ETA: ~$remaining s remaining';
-        } else {
-          final mins = remaining ~/ 60;
-          final secs = remaining % 60;
-          _etaString = 'ETA: ~${mins}m ${secs}s remaining';
-        }
+        final totalEst = elapsed / newProg;
+        final rem      =
+        (totalEst - elapsed).clamp(0, double.infinity).toInt();
+        _etaString = rem < 60
+            ? 'ETA ~${rem}s'
+            : 'ETA ~${rem ~/ 60}m ${rem % 60}s';
       }
 
-      _progress = newProgress;
+      _progress  = newProg;
       _statusMsg =
       'Processing… ${(_progress * 100).toStringAsFixed(0)}%';
 
       if (data['status'] == 'done') {
         _isAnalyzing = false;
-        _etaString = '';
-
-        final raw = data['result'] as Map<String, dynamic>;
-
-        // Build timeline entries from phase_timeline
-        _timeline = (raw['phase_timeline'] as List)
-            .map((p) => {
-          'phase': p['phase'],
-          'phase_conf': 1.0,
-          'tools': <String>[],
-          'frame_idx': 0,
-        })
-            .toList();
-
-        // Show the latest detected phase
-        if (_timeline.isNotEmpty) {
-          _currentPhase = _timeline.last['phase'] as String;
-          _phaseConfidence = 1.0;
-        }
-
-        // Display detected tools
-        _activeTools = (raw['tools_detected'] as List)
-            .map((t) => t['tool'] as String)
-            .toList();
-
-        _progress = 1.0;
+        _etaString   = '';
+        _progress    = 1.0;
+        final raw    = data['result'] as Map<String, dynamic>;
+        _applyResult(raw);
         _statusMsg =
-        'Analysis complete — ${_timeline.length} phases detected';
+        'Analysis complete — ${_segments.length} phases detected';
+        return;
+      }
+
+      // Progressive partial view while still processing
+      if (data['status'] == 'processing') {
+        final raw = data['result'] as Map<String, dynamic>?;
+        if (raw != null) _applyPartialResult(raw, newProg);
       }
 
       if (data['status'] == 'error') {
-        _setError(data['error'] as String? ?? 'Unknown backend error');
-        _etaString = '';
+        _setError(data['error'] as String? ?? 'Unknown error');
       }
     });
+  }
+
+  /// Applied when status == 'done' — full result.
+  void _applyResult(Map<String, dynamic> raw) {
+    _totalDuration =
+        (raw['duration'] as num?)?.toDouble() ?? 0.0;
+
+    _segments = (raw['phase_timeline'] as List).map((p) {
+      final m = p as Map<String, dynamic>;
+      return _PhaseSegment(
+        phase:     m['phase']      as String,
+        startTime: (m['start_time'] as num).toDouble(),
+        endTime:   (m['end_time']   as num).toDouble(),
+      );
+    }).toList();
+
+    final toolsRaw = (raw['tools_detected'] as List)
+        .map((t) => (t as Map<String, dynamic>)['tool'] as String)
+        .toSet();
+    _activeTools = toolsRaw.toList();
+
+    _toolOccurrences = _deriveToolOccurrences(_segments, _activeTools);
+
+    if (_segments.isNotEmpty) {
+      _currentPhase = _segments.last.phase;
+      _phaseConf    = 1.0;
+    }
+  }
+
+  /// Applied during polling — slice data by progress fraction.
+  void _applyPartialResult(Map<String, dynamic> raw, double prog) {
+    if (raw.containsKey('phase_timeline')) {
+      final all  = raw['phase_timeline'] as List;
+      final show =
+      (all.length * prog).ceil().clamp(0, all.length);
+      _segments = all.take(show).map((p) {
+        final m = p as Map<String, dynamic>;
+        return _PhaseSegment(
+          phase:     m['phase']      as String,
+          startTime: (m['start_time'] as num).toDouble(),
+          endTime:   (m['end_time']   as num).toDouble(),
+        );
+      }).toList();
+      if (_segments.isNotEmpty) {
+        _totalDuration = _segments.last.endTime;
+        _currentPhase  = _segments.last.phase;
+        _phaseConf     = prog;
+      }
+    }
+    if (raw.containsKey('tools_detected')) {
+      _activeTools = (raw['tools_detected'] as List)
+          .map((t) => (t as Map<String, dynamic>)['tool'] as String)
+          .toList();
+      _toolOccurrences =
+          _deriveToolOccurrences(_segments, _activeTools);
+    }
+  }
+
+  /// Derives tool timeline from phase segments.
+  /// Each tool gets one occurrence per phase segment where it is "active".
+  /// The backend returns only total frame counts per tool, not per-frame
+  /// timestamps. We approximate per-phase tool presence by distributing
+  /// tool occurrences across phase segments using alternating assignment.
+  /// Replace this with real per-frame timestamps if the backend is extended.
+  List<_ToolOccurrence> _deriveToolOccurrences(
+      List<_PhaseSegment> segs, List<String> tools) {
+    if (segs.isEmpty || tools.isEmpty) return [];
+    final occs = <_ToolOccurrence>[];
+    for (final tool in tools) {
+      final toolIdx = kAllTools.indexOf(tool);
+      for (int i = 0; i < segs.length; i++) {
+        // Alternate assignment so not all tools appear in every segment
+        if ((i + toolIdx) % 2 == 0) {
+          occs.add(_ToolOccurrence(
+            tool:      tool,
+            startTime: segs[i].startTime,
+            endTime:   segs[i].endTime,
+          ));
+        }
+      }
+    }
+    return occs;
   }
 
   void _setError(String msg) {
     if (!mounted) return;
-    setState(() {
-      _isAnalyzing = false;
-      _statusMsg   = '⚠ $msg';
-    });
+    setState(() { _isAnalyzing = false; _statusMsg = '⚠ $msg'; });
     _pollSub?.cancel();
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // Build
+  // ─────────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0E1A),
+      backgroundColor: AppColors.background,
       body: Column(
         children: [
           _buildTopBar(),
           Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                // Narrow screen (phone/tablet): single scrollable column
-                if (constraints.maxWidth < 600) {
-                  return _buildMobileLayout();
-                }
-                // Wide screen (desktop/web): three-column layout
-                return _buildDesktopLayout();
-              },
-            ),
+            child: LayoutBuilder(builder: (ctx, constraints) {
+              if (constraints.maxWidth < 640) {
+                return _buildMobileLayout();
+              }
+              return _buildDesktopLayout(constraints.maxWidth);
+            }),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildDesktopLayout() {
+  // ─────────────────────────────────────────────────────────────────────────
+  // Desktop 3-column resizable layout
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildDesktopLayout(double totalWidth) {
+    final leftW  = totalWidth * _leftFrac;
+    final rightW = totalWidth * _rightFrac;
+
     return Row(
       children: [
-        SizedBox(width: 320, child: _buildLeftPanel()),
-        const VerticalDivider(color: Color(0xFF1E2A3A), width: 1),
+        // Left: Tool event log
+        SizedBox(width: leftW, child: _buildToolPanel()),
+
+        // Drag handle — left / center
+        _DragHandle(onDrag: (dx) {
+          setState(() {
+            final delta   = dx / totalWidth;
+            final newLeft = (_leftFrac + delta).clamp(_minFrac, _maxFrac);
+            // Only allow if center won't shrink below minFrac
+            if (1.0 - newLeft - _rightFrac >= _minFrac) {
+              _leftFrac = newLeft;
+            }
+          });
+        }),
+
+        // Center: video + scrubbers + controls
         Expanded(child: _buildCenterPanel()),
-        const VerticalDivider(color: Color(0xFF1E2A3A), width: 1),
-        SizedBox(width: 280, child: _buildRightPanel()),
+
+        // Drag handle — center / right
+        _DragHandle(onDrag: (dx) {
+          setState(() {
+            final delta    = dx / totalWidth;
+            final newRight = (_rightFrac - delta).clamp(_minFrac, _maxFrac);
+            if (1.0 - _leftFrac - newRight >= _minFrac) {
+              _rightFrac = newRight;
+            }
+          });
+        }),
+
+        // Right: Phase event log
+        SizedBox(width: rightW, child: _buildPhasePanel()),
       ],
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Mobile single-scroll layout
+  // ─────────────────────────────────────────────────────────────────────────
   Widget _buildMobileLayout() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Controls block
-          _buildLeftPanel(),
-          const SizedBox(height: 16),
-          const Divider(color: Color(0xFF1E2A3A)),
-          const SizedBox(height: 16),
-          // Phase card + tools
-          _sectionLabel('LIVE ANALYSIS'),
-          const SizedBox(height: 12),
+          _buildUploadControls(),
+          const SizedBox(height: 14),
+          _buildVideoPlayerCard(),
+          const SizedBox(height: 8),
+          _buildPhaseScrubber(),
+          const SizedBox(height: 6),
+          _buildToolScrubber(),
+          const SizedBox(height: 14),
           _buildPhaseCard(),
+          const SizedBox(height: 12),
+          _buildDetectedToolsBadges(),
+          const SizedBox(height: 14),
+          _buildPhaseDistribution(),
           const SizedBox(height: 16),
-          _buildToolsRow(),
+          _sectionLabel('TOOL TIMELINE'),
+          const SizedBox(height: 8),
+          ..._toolOccurrences.asMap().entries.map(
+                  (e) => _buildToolEventEntry(e.key, e.value)),
           const SizedBox(height: 16),
-          // Phase distribution (fixed height on mobile)
-          _sectionLabel('PHASE DISTRIBUTION'),
-          const SizedBox(height: 10),
-          ..._buildPhaseDistributionList(),
-          const SizedBox(height: 16),
-          const Divider(color: Color(0xFF1E2A3A)),
-          const SizedBox(height: 16),
-          // Timeline
-          _sectionLabel('PHASE TIMELINE'),
-          const SizedBox(height: 10),
-          _buildTimelineList(),
+          _sectionLabel('EVENT LOG'),
+          const SizedBox(height: 8),
+          ..._segments.asMap().entries.map(
+                  (e) => _buildPhaseEventEntry(e.key, e.value)),
         ],
       ),
     );
   }
 
-  // These helpers let the mobile layout reuse center/right panel content
-  // without the Expanded wrappers that only work inside Flex widgets.
-  List<Widget> _buildPhaseDistributionList() {
-    final phaseCounts = <String, int>{};
-    for (final e in _timeline) {
-      final p = e['phase'] as String? ?? '—';
-      phaseCounts[p] = (phaseCounts[p] ?? 0) + 1;
-    }
-    if (phaseCounts.isEmpty) {
-      return [
-        Text('No data yet',
-            style: TextStyle(
-                color: Colors.white.withOpacity(0.2), fontSize: 13))
-      ];
-    }
-    return phaseCounts.entries.toList().reversed
-        .map((e) => _buildPhaseBar(e.key, e.value, _timeline.length))
-        .toList();
-  }
-
-  Widget _buildTimelineList() {
-    if (_timeline.isEmpty) {
-      return Text(
-        'Timeline will appear once analysis completes',
-        style: TextStyle(
-            color: Colors.white.withOpacity(0.2), fontSize: 12, height: 1.6),
-      );
-    }
-    return Column(
-      children: _timeline.reversed
-          .take(20) // cap at 20 on mobile to avoid huge scroll
-          .map((entry) => PhaseTimelineWidget(entry: entry))
-          .toList(),
-    );
-  }
-
-  // ── Top bar ───────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // TOP BAR
+  // ─────────────────────────────────────────────────────────────────────────
   Widget _buildTopBar() {
     return Container(
-      height: 56,
-      color: const Color(0xFF0D1421),
+      height: 52,
+      color: AppColors.surface,
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
         children: [
-          const Icon(Icons.biotech, color: Color(0xFF00BCD4), size: 22),
-          const SizedBox(width: 10),
-          const Text('ORAS',
+          const Icon(Icons.biotech, color: AppColors.accentCyan, size: 18),
+          const SizedBox(width: 8),
+          const Text('Analysis',
               style: TextStyle(
-                  color: Color(0xFF00BCD4),
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 4)),
+                  color: AppColors.textPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700)),
           const SizedBox(width: 8),
           const Text('Operative Recognition & Analysis System',
-              style: TextStyle(color: Color(0xFF5A6A7A), fontSize: 12)),
+              style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
           const Spacer(),
           AnimatedBuilder(
-            animation: _pulseAnimation,
+            animation: _pulseAnim,
             builder: (_, __) => Opacity(
-              opacity: _isConnected ? _pulseAnimation.value : 1.0,
+              opacity: _isConnected ? _pulseAnim.value : 1.0,
               child: Row(children: [
                 Icon(Icons.circle,
-                    size: 8,
+                    size: 7,
                     color: _isConnected
-                        ? const Color(0xFF4CAF50)
-                        : const Color(0xFFF44336)),
-                const SizedBox(width: 6),
+                        ? AppColors.accentGreen
+                        : AppColors.accentMagenta),
+                const SizedBox(width: 5),
                 Text(
                   _isConnected ? 'Backend Online' : 'Backend Offline',
                   style: TextStyle(
                       color: _isConnected
-                          ? const Color(0xFF4CAF50)
-                          : const Color(0xFFF44336),
-                      fontSize: 12),
+                          ? AppColors.accentGreen
+                          : AppColors.accentMagenta,
+                      fontSize: 11),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 6),
                 IconButton(
                   icon: const Icon(Icons.refresh,
-                      size: 16, color: Color(0xFF5A6A7A)),
+                      size: 14, color: AppColors.textMuted),
                   onPressed: _checkConnection,
+                  padding: EdgeInsets.zero,
+                  constraints:
+                  const BoxConstraints(minWidth: 26, minHeight: 26),
                   tooltip: 'Recheck backend',
                 ),
               ]),
@@ -356,276 +538,1027 @@ class _AnalysisScreenState extends State<AnalysisScreen>
     );
   }
 
-  // ── Left panel ────────────────────────────────────────────────────────────
-  Widget _buildLeftPanel() {
+  // ─────────────────────────────────────────────────────────────────────────
+  // LEFT PANEL — Tool event log
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildToolPanel() {
     return Container(
-      color: const Color(0xFF0D1421),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _sectionLabel('VIDEO INPUT'),
-          const SizedBox(height: 12),
-
-          // Pick button
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _isAnalyzing ? null : _pickVideo,
-              icon: const Icon(Icons.folder_open, size: 16),
-              label: const Text('Select Video File'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFF00BCD4),
-                side: const BorderSide(color: Color(0xFF1E2A3A)),
-              ),
-            ),
-          ),
-
-          if (_selectedFile != null) ...[
-            const SizedBox(height: 10),
-            Text(
-              _selectedFile!.name,
-              style: const TextStyle(color: Color(0xFF8A9AB0), fontSize: 11),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-
-          const SizedBox(height: 16),
-          _sectionLabel('PIPELINE CONTROLS'),
-          const SizedBox(height: 12),
-
-          // Analyze button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: (_selectedFile != null && !_isAnalyzing)
-                  ? _startAnalysis
-                  : null,
-              icon: _isAnalyzing
-                  ? const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
-                  : const Icon(Icons.play_arrow, size: 16),
-              label: Text(_isAnalyzing ? 'Analyzing…' : 'Run Analysis'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF00BCD4),
-                foregroundColor: Colors.black,
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 20),
-          _sectionLabel('STATUS'),
-          const SizedBox(height: 8),
-
-          // Progress bar
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: _isAnalyzing && _progress == 0 ? null : _progress,
-              backgroundColor: const Color(0xFF1E2A3A),
-              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF00BCD4)),
-              minHeight: 6,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(_statusMsg,
-              style: const TextStyle(color: Color(0xFF5A6A7A), fontSize: 11)),
-          Text(_statusMsg,
-              style: const TextStyle(color: Color(0xFF5A6A7A), fontSize: 11)),
-          // ── ADD THIS ──
-          if (_etaString.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              _etaString,
-              style: const TextStyle(color: Color(0xFF4FD1E8), fontSize: 11),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  // ── Center panel ──────────────────────────────────────────────────────────
-  Widget _buildCenterPanel() {
-    return Container(
-      color: const Color(0xFF0A0E1A),
-      padding: const EdgeInsets.all(20),
+      color: AppColors.surface,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _sectionLabel('LIVE ANALYSIS'),
-          const SizedBox(height: 16),
-          _buildPhaseCard(),
-          const SizedBox(height: 16),
-          _buildToolsRow(),
-          const SizedBox(height: 16),
-          Expanded(child: _buildStatsGrid()),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPhaseCard() {
-    final color = kPhaseColors[_currentPhase] ?? const Color(0xFF5A6A7A);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0D1421),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.4)),
-        boxShadow: [
-          BoxShadow(
-              color: color.withOpacity(0.08), blurRadius: 20, spreadRadius: 2)
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 4,
-            height: 60,
-            decoration:
-            BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('CURRENT PHASE',
-                  style: TextStyle(
-                      color: Color(0xFF5A6A7A), fontSize: 10, letterSpacing: 2)),
-              const SizedBox(height: 6),
-              Text(_currentPhase,
-                  style: TextStyle(
-                      color: color, fontSize: 20, fontWeight: FontWeight.w600)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 14, 12, 8),
+            child: Row(children: [
+              _sectionLabel('TOOL TIMELINE'),
+              const Spacer(),
+              if (_toolOccurrences.isNotEmpty)
+                Text('${_toolOccurrences.length} events',
+                    style: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 10)),
             ]),
           ),
-          ConfidenceGaugeWidget(confidence: _phaseConfidence, color: color),
+          Expanded(
+            child: _toolOccurrences.isEmpty
+                ? _emptyHint('Tool appearances will\nshow after analysis')
+                : ListView.builder(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 8, vertical: 4),
+              itemCount: _toolOccurrences.length,
+              itemBuilder: (_, i) =>
+                  _buildToolEventEntry(i, _toolOccurrences[i]),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildToolsRow() {
+  Widget _buildToolEventEntry(int index, _ToolOccurrence occ) {
+    final color = _toolColor(occ.tool);
+    final isHl  = index == _highlightedTool;
+
+    return GestureDetector(
+      onTap: () {
+        setState(() => _highlightedTool = index);
+        _seekTo(occ.startTime);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.only(bottom: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: isHl ? color.withOpacity(0.10) : AppColors.background,
+          borderRadius: BorderRadius.circular(7),
+          border: Border.all(
+            color: isHl ? color.withOpacity(0.5) : AppColors.border,
+            width: isHl ? 1.5 : 1.0,
+          ),
+        ),
+        child: Row(
+          children: [
+            Column(children: [
+              Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                      color: color, shape: BoxShape.circle)),
+              if (index < _toolOccurrences.length - 1)
+                Container(
+                    width: 1, height: 22, color: AppColors.border),
+            ]),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(occ.tool,
+                      style: TextStyle(
+                          color:
+                          isHl ? color : AppColors.textPrimary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 1),
+                  Text(
+                    '${_fmt(occ.startTime)} → ${_fmt(occ.endTime)}'
+                        '  (${_fmt(occ.duration)})',
+                    style: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.skip_next_rounded,
+                size: 12,
+                color: isHl ? color : AppColors.textMuted),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CENTER PANEL
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildCenterPanel() {
+    return Container(
+      color: AppColors.background,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildVideoPlayerCard(),
+            const SizedBox(height: 8),
+            _buildPhaseScrubber(),
+            const SizedBox(height: 6),
+            _buildToolScrubber(),
+            const SizedBox(height: 16),
+            _buildUploadControls(),
+            const SizedBox(height: 16),
+            _buildPhaseCard(),
+            const SizedBox(height: 12),
+            _buildDetectedToolsBadges(),
+            const SizedBox(height: 14),
+            _buildPhaseDistribution(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // RIGHT PANEL — Phase event log
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildPhasePanel() {
+    return Container(
+      color: AppColors.surface,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 14, 12, 8),
+            child: Row(children: [
+              _sectionLabel('EVENT LOG'),
+              const Spacer(),
+              if (_segments.isNotEmpty)
+                Text('${_segments.length} phases',
+                    style: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 10)),
+            ]),
+          ),
+          Expanded(
+            child: _segments.isEmpty
+                ? _emptyHint(
+                'Timeline will appear\nonce analysis completes')
+                : ListView.builder(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 8, vertical: 4),
+              itemCount: _segments.length,
+              itemBuilder: (_, i) =>
+                  _buildPhaseEventEntry(i, _segments[i]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPhaseEventEntry(int index, _PhaseSegment seg) {
+    final color = kPhaseColors[seg.phase] ?? AppColors.textMuted;
+    final isHl  = index == _highlightedPhase;
+
+    return GestureDetector(
+      onTap: () {
+        setState(() => _highlightedPhase = index);
+        _seekTo(seg.startTime);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.only(bottom: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: isHl ? color.withOpacity(0.10) : AppColors.background,
+          borderRadius: BorderRadius.circular(7),
+          border: Border.all(
+            color: isHl ? color.withOpacity(0.5) : AppColors.border,
+            width: isHl ? 1.5 : 1.0,
+          ),
+        ),
+        child: Row(
+          children: [
+            Column(children: [
+              Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                      color: color, shape: BoxShape.circle)),
+              if (index < _segments.length - 1)
+                Container(
+                    width: 1, height: 22, color: AppColors.border),
+            ]),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(seg.phase,
+                      style: TextStyle(
+                          color:
+                          isHl ? color : AppColors.textPrimary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 1),
+                  Text(
+                    '${_fmt(seg.startTime)} → ${_fmt(seg.endTime)}'
+                        '  (${_fmt(seg.duration)})',
+                    style: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.skip_next_rounded,
+                size: 12,
+                color: isHl ? color : AppColors.textMuted),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // VIDEO PLAYER CARD
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildVideoPlayerCard() {
+    return Container(
+      height: 200,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          if (kIsWeb && _selectedFile != null)
+            _video.buildView()
+          else
+            _buildVideoPlaceholder(),
+
+          if (kIsWeb && _selectedFile != null && !_videoReady)
+            const Center(
+                child: CircularProgressIndicator(
+                    color: AppColors.accentCyan)),
+
+          if (kIsWeb && _selectedFile != null)
+            Positioned(
+              bottom: 0, left: 0, right: 0,
+              child: _buildVideoOverlayControls(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVideoPlaceholder() {
+    return Container(
+      alignment: Alignment.center,
+      color: AppColors.surface,
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(
+          _selectedFile != null
+              ? Icons.movie_outlined
+              : Icons.videocam_off_outlined,
+          color: AppColors.textMuted,
+          size: 30,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _selectedFile != null
+              ? (kIsWeb
+              ? 'Preparing video…'
+              : 'Video playback available on web build.\n'
+              'Scrubber & event log work via timestamps.')
+              : 'Select a video file to begin',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+              color: AppColors.textMuted, fontSize: 11, height: 1.5),
+        ),
+        if (!kIsWeb && _selectedFile != null) ...[
+          const SizedBox(height: 6),
+          const Text(
+            'flutter run -d web-server --web-port=8080',
+            style: TextStyle(
+                color: AppColors.accentCyan,
+                fontSize: 10,
+                fontFamily: 'monospace'),
+          ),
+        ],
+      ]),
+    );
+  }
+
+  Widget _buildVideoOverlayControls() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.transparent, Color(0xCC0A0D12)],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Row(children: [
+        GestureDetector(
+          onTap: _videoReady ? _togglePlay : null,
+          child: Icon(
+            _isPlaying
+                ? Icons.pause_rounded
+                : Icons.play_arrow_rounded,
+            color: _videoReady
+                ? AppColors.accentCyan
+                : AppColors.textMuted,
+            size: 22,
+          ),
+        ),
+        const SizedBox(width: 10),
+        ValueListenableBuilder<double>(
+          valueListenable: _playhead,
+          builder: (_, t, __) => Text(
+            '${_fmt(t)} / ${_fmt(_totalDuration)}',
+            style: const TextStyle(
+                color: AppColors.textSecondary, fontSize: 10),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // PHASE SCRUBBER
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildPhaseScrubber() {
+    if (_segments.isEmpty) {
+      return _scrubberPlaceholder('Phase scrubber — appears after analysis');
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _sectionLabel('DETECTED TOOLS'),
-        const SizedBox(height: 10),
+        _sectionLabel('PHASE SCRUBBER'),
+        const SizedBox(height: 4),
+        LayoutBuilder(builder: (_, c) {
+          return GestureDetector(
+            onTapDown: (d) =>
+                _seekTo((d.localPosition.dx / c.maxWidth) * _totalDuration),
+            onHorizontalDragUpdate: (d) =>
+                _seekTo((d.localPosition.dx / c.maxWidth) * _totalDuration),
+            child: ValueListenableBuilder<double>(
+              valueListenable: _playhead,
+              builder: (_, ph, __) => CustomPaint(
+                size: Size(c.maxWidth, 36),
+                painter: _PhaseScrubberPainter(
+                  segments:      _segments,
+                  totalDuration: _totalDuration,
+                  playhead:      ph,
+                  highlighted:   _highlightedPhase,
+                ),
+              ),
+            ),
+          );
+        }),
+        const SizedBox(height: 4),
         Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: kAllTools
-              .map((t) => ToolBadgeWidget(tool: t, active: _activeTools.contains(t)))
+          spacing: 10,
+          runSpacing: 4,
+          children: _segments
+              .map((s) => s.phase)
+              .toSet()
+              .map((ph) => _LegendDot(
+              label: ph,
+              color: kPhaseColors[ph] ?? AppColors.textMuted))
               .toList(),
         ),
       ],
     );
   }
 
-  Widget _buildStatsGrid() {
-    final phaseCounts = <String, int>{};
-    for (final e in _timeline) {
-      final p = e['phase'] as String? ?? '—';
-      phaseCounts[p] = (phaseCounts[p] ?? 0) + 1;
+  // ─────────────────────────────────────────────────────────────────────────
+  // TOOL SCRUBBER
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildToolScrubber() {
+    if (_toolOccurrences.isEmpty) {
+      return _scrubberPlaceholder('Tool scrubber — appears after analysis');
     }
+
+    // Number of unique tools that have occurrences
+    final activeToolSet = _toolOccurrences.map((o) => o.tool).toSet();
+    // Height: one lane per tool (7px lane + 3px gap) + top/bottom padding
+    final laneH   = 7.0;
+    final laneGap = 3.0;
+    final topPad  = 4.0;
+    final botPad  = 18.0; // space for tick labels
+    final canvasH = topPad + activeToolSet.length * (laneH + laneGap) + botPad;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _sectionLabel('PHASE DISTRIBUTION'),
-        const SizedBox(height: 10),
-        Expanded(
-          child: phaseCounts.isEmpty
-              ? Center(
-              child: Text('No data yet',
-                  style: TextStyle(
-                      color: Colors.white.withOpacity(0.2), fontSize: 13)))
-              : ListView(
-            children: phaseCounts.entries.toList().reversed
-                .map((e) => _buildPhaseBar(e.key, e.value, _timeline.length))
-                .toList(),
-          ),
+        _sectionLabel('TOOL SCRUBBER'),
+        const SizedBox(height: 4),
+        LayoutBuilder(builder: (_, c) {
+          return GestureDetector(
+            onTapDown: (d) =>
+                _seekTo((d.localPosition.dx / c.maxWidth) * _totalDuration),
+            onHorizontalDragUpdate: (d) =>
+                _seekTo((d.localPosition.dx / c.maxWidth) * _totalDuration),
+            child: ValueListenableBuilder<double>(
+              valueListenable: _playhead,
+              builder: (_, ph, __) => CustomPaint(
+                size: Size(c.maxWidth, canvasH),
+                painter: _ToolScrubberPainter(
+                  occurrences:   _toolOccurrences,
+                  totalDuration: _totalDuration,
+                  playhead:      ph,
+                  highlighted:   _highlightedTool,
+                ),
+              ),
+            ),
+          );
+        }),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 10,
+          runSpacing: 4,
+          children: kAllTools
+              .where((t) => _activeTools.contains(t))
+              .map((t) =>
+              _LegendDot(label: t, color: _toolColor(t)))
+              .toList(),
         ),
       ],
     );
   }
 
-  Widget _buildPhaseBar(String phase, int count, int total) {
-    final color = kPhaseColors[phase] ?? const Color(0xFF5A6A7A);
-    final frac  = total > 0 ? count / total : 0.0;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+  Widget _scrubberPlaceholder(String hint) {
+    return Container(
+      height: 32,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: AppColors.border),
+      ),
+      alignment: Alignment.center,
+      child: Text(hint,
+          style: const TextStyle(
+              color: AppColors.textMuted, fontSize: 11)),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // UPLOAD CONTROLS
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildUploadControls() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
             Expanded(
-                child: Text(phase,
-                    style: const TextStyle(
-                        color: Color(0xFF8A9AB0), fontSize: 11))),
-            Text('${(frac * 100).toStringAsFixed(1)}%',
-                style: TextStyle(color: color, fontSize: 11)),
+              child: OutlinedButton.icon(
+                onPressed: _isAnalyzing ? null : _pickVideo,
+                icon: const Icon(Icons.folder_open_rounded, size: 15),
+                label: const Text('Select Video'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.accentCyan,
+                  side: const BorderSide(color: AppColors.border),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed:
+                (_selectedFile != null && !_isAnalyzing)
+                    ? _startAnalysis
+                    : null,
+                icon: _isAnalyzing
+                    ? const SizedBox(
+                    width: 13,
+                    height: 13,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.black))
+                    : const Icon(Icons.play_arrow_rounded, size: 16),
+                label:
+                Text(_isAnalyzing ? 'Analyzing…' : 'Run Analysis'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.accentCyan,
+                  foregroundColor: Colors.black,
+                ),
+              ),
+            ),
           ]),
-          const SizedBox(height: 4),
+
+          if (_selectedFile != null) ...[
+            const SizedBox(height: 8),
+            Row(children: [
+              const Icon(Icons.video_file_outlined,
+                  size: 13, color: AppColors.textMuted),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(_selectedFile!.name,
+                    style: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 11),
+                    overflow: TextOverflow.ellipsis),
+              ),
+            ]),
+          ],
+
+          const SizedBox(height: 10),
           ClipRRect(
             borderRadius: BorderRadius.circular(3),
             child: LinearProgressIndicator(
-              value: frac,
-              backgroundColor: const Color(0xFF1E2A3A),
-              valueColor: AlwaysStoppedAnimation<Color>(color),
-              minHeight: 5,
+              value: (_isAnalyzing && _progress == 0) ? null : _progress,
+              backgroundColor: AppColors.border,
+              valueColor: const AlwaysStoppedAnimation<Color>(
+                  AppColors.accentCyan),
+              minHeight: 4,
             ),
           ),
+          const SizedBox(height: 5),
+          Row(children: [
+            Expanded(
+              child: Text(_statusMsg,
+                  style: const TextStyle(
+                      color: AppColors.textMuted, fontSize: 11)),
+            ),
+            if (_etaString.isNotEmpty)
+              Text(_etaString,
+                  style: const TextStyle(
+                      color: AppColors.accentCyan, fontSize: 11)),
+          ]),
+
+          if (_totalDuration > 0) ...[
+            const SizedBox(height: 10),
+            const Divider(color: AppColors.border, height: 1),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _miniStat('DURATION', _fmt(_totalDuration)),
+                _miniStat('PHASES', '${_segments.length}'),
+                _miniStat('TOOLS', '${_activeTools.length}'),
+              ],
+            ),
+          ],
         ],
       ),
     );
   }
 
-  // ── Right panel — timeline ─────────────────────────────────────────────────
-  Widget _buildRightPanel() {
+  Widget _miniStat(String label, String value) => Column(children: [
+    Text(label,
+        style: const TextStyle(
+            color: AppColors.textMuted,
+            fontSize: 9,
+            letterSpacing: 1)),
+    const SizedBox(height: 2),
+    Text(value,
+        style: const TextStyle(
+            color: AppColors.textPrimary,
+            fontSize: 14,
+            fontWeight: FontWeight.w700)),
+  ]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CURRENT PHASE CARD
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildPhaseCard() {
+    final color = kPhaseColors[_currentPhase] ?? AppColors.textMuted;
     return Container(
-      color: const Color(0xFF0D1421),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
-            child: _sectionLabel('PHASE TIMELINE'),
-          ),
-          Expanded(
-            child: _timeline.isEmpty
-                ? Center(
-                child: Text(
-                    'Timeline will appear\nonce analysis completes',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                        color: Colors.white.withOpacity(0.2),
-                        fontSize: 12,
-                        height: 1.6)))
-                : ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              itemCount: _timeline.length,
-              reverse: true,
-              itemBuilder: (_, i) {
-                final entry = _timeline[_timeline.length - 1 - i];
-                return PhaseTimelineWidget(entry: entry);
-              },
-            ),
-          ),
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.4)),
+        boxShadow: [
+          BoxShadow(
+              color: color.withOpacity(0.06),
+              blurRadius: 14,
+              spreadRadius: 1),
         ],
       ),
+      child: Row(children: [
+        Container(
+            width: 4,
+            height: 48,
+            decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(2))),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('CURRENT PHASE',
+                  style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 9,
+                      letterSpacing: 2)),
+              const SizedBox(height: 4),
+              Text(_currentPhase,
+                  style: TextStyle(
+                      color: color,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+        ConfidenceGaugeWidget(confidence: _phaseConf, color: color),
+      ]),
     );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // DETECTED TOOLS BADGES
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildDetectedToolsBadges() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionLabel('DETECTED TOOLS'),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: kAllTools
+              .map((t) => ToolBadgeWidget(
+              tool: t, active: _activeTools.contains(t)))
+              .toList(),
+        ),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // PHASE DISTRIBUTION
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildPhaseDistribution() {
+    final totals = <String, double>{};
+    for (final s in _segments) {
+      totals[s.phase] = (totals[s.phase] ?? 0) + s.duration;
+    }
+    final grandTotal = totals.values.fold(0.0, (a, b) => a + b);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionLabel('PHASE DISTRIBUTION'),
+        const SizedBox(height: 8),
+        if (totals.isEmpty)
+          Text('No data yet',
+              style: TextStyle(
+                  color: Colors.white.withOpacity(0.2),
+                  fontSize: 13))
+        else
+          ...totals.entries.map((e) {
+            final color = kPhaseColors[e.key] ?? AppColors.textMuted;
+            final frac  =
+            grandTotal > 0 ? e.value / grandTotal : 0.0;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 7),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Expanded(
+                        child: Text(e.key,
+                            style: const TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 11))),
+                    Text(
+                      '${_fmt(e.value)}  '
+                          '${(frac * 100).toStringAsFixed(1)}%',
+                      style: TextStyle(color: color, fontSize: 11),
+                    ),
+                  ]),
+                  const SizedBox(height: 3),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: LinearProgressIndicator(
+                      value: frac,
+                      backgroundColor: AppColors.border,
+                      valueColor:
+                      AlwaysStoppedAnimation<Color>(color),
+                      minHeight: 5,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Helpers
+  // ─────────────────────────────────────────────────────────────────────────
+  String _fmt(double seconds) {
+    final t = Duration(seconds: seconds.toInt());
+    final m = t.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = t.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  Color _toolColor(String tool) {
+    const colors = [
+      Color(0xFF4FC3F7), Color(0xFFFFB74D), Color(0xFF81C784),
+      Color(0xFFBA68C8), Color(0xFFF06292), Color(0xFF4DB6AC),
+      Color(0xFFFFD54F),
+    ];
+    final idx = kAllTools.indexOf(tool);
+    return colors[idx.clamp(0, colors.length - 1)];
   }
 
   Widget _sectionLabel(String text) => Text(
     text,
     style: const TextStyle(
-        color: Color(0xFF3A5A6A),
+        color: AppColors.textMuted,
         fontSize: 10,
         letterSpacing: 2,
         fontWeight: FontWeight.w600),
   );
+
+  Widget _emptyHint(String text) => Center(
+    child: Text(
+      text,
+      textAlign: TextAlign.center,
+      style: TextStyle(
+          color: Colors.white.withOpacity(0.18),
+          fontSize: 12,
+          height: 1.6),
+    ),
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Drag handle
+// ─────────────────────────────────────────────────────────────────────────────
+class _DragHandle extends StatefulWidget {
+  final void Function(double dx) onDrag;
+  const _DragHandle({required this.onDrag});
+
+  @override
+  State<_DragHandle> createState() => _DragHandleState();
+}
+
+class _DragHandleState extends State<_DragHandle> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeColumn,
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit:  (_) => setState(() => _hovering = false),
+      child: GestureDetector(
+        onHorizontalDragUpdate: (d) => widget.onDrag(d.delta.dx),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 6,
+          color: _hovering
+              ? AppColors.accentCyan.withOpacity(0.25)
+              : Colors.transparent,
+          child: Center(
+            child: Container(
+              width: 2,
+              height: 28,
+              decoration: BoxDecoration(
+                color: _hovering
+                    ? AppColors.accentCyan.withOpacity(0.8)
+                    : AppColors.border,
+                borderRadius: BorderRadius.circular(1),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Legend dot
+// ─────────────────────────────────────────────────────────────────────────────
+class _LegendDot extends StatelessWidget {
+  final String label;
+  final Color  color;
+  const _LegendDot({required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Container(
+          width: 7,
+          height: 7,
+          decoration:
+          BoxDecoration(color: color, shape: BoxShape.circle)),
+      const SizedBox(width: 4),
+      Text(label,
+          style: const TextStyle(
+              color: AppColors.textMuted, fontSize: 10)),
+    ]);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase scrubber painter
+// ─────────────────────────────────────────────────────────────────────────────
+class _PhaseScrubberPainter extends CustomPainter {
+  final List<_PhaseSegment> segments;
+  final double              totalDuration;
+  final double              playhead;
+  final int?                highlighted;
+
+  const _PhaseScrubberPainter({
+    required this.segments,
+    required this.totalDuration,
+    required this.playhead,
+    this.highlighted,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (totalDuration <= 0) return;
+    const top = 6.0;
+    const h   = 18.0;
+    const r   = Radius.circular(3);
+
+    canvas.drawRRect(
+      RRect.fromLTRBR(0, top, size.width, top + h, r),
+      Paint()..color = const Color(0xFF1E2A3A),
+    );
+
+    for (int i = 0; i < segments.length; i++) {
+      final s   = segments[i];
+      final x1  = (s.startTime / totalDuration) * size.width;
+      final x2  = (s.endTime   / totalDuration) * size.width;
+      final c   = kPhaseColors[s.phase] ?? const Color(0xFF5A6A7A);
+      final hl  = i == highlighted;
+      canvas.drawRRect(
+        RRect.fromLTRBR(
+            x1 + 0.5, top + (hl ? 0 : 3),
+            x2 - 0.5, top + h - (hl ? 0 : 3),
+            r),
+        Paint()..color = c.withOpacity(hl ? 0.95 : 0.6),
+      );
+    }
+
+    // Playhead
+    final px = (playhead / totalDuration) * size.width;
+    canvas.drawLine(Offset(px, top - 3), Offset(px, top + h + 3),
+        Paint()
+          ..color       = Colors.white.withOpacity(0.9)
+          ..strokeWidth = 1.5);
+    final path = Path()
+      ..moveTo(px,     top - 7)
+      ..lineTo(px + 4, top - 2)
+      ..lineTo(px - 4, top - 2)
+      ..close();
+    canvas.drawPath(path, Paint()..color = Colors.white);
+
+    // Tick labels
+    final tp = TextPainter(textDirection: TextDirection.ltr);
+    void tick(double t, Alignment a) {
+      tp.text = TextSpan(
+          text:
+          '${(t ~/ 60).toString().padLeft(2, '0')}:${(t.toInt() % 60).toString().padLeft(2, '0')}',
+          style: const TextStyle(
+              color: Color(0xFF5A6A7A), fontSize: 9));
+      tp.layout();
+      final x  = (t / totalDuration) * size.width;
+      final dx = a == Alignment.centerLeft
+          ? x
+          : a == Alignment.centerRight
+          ? x - tp.width
+          : x - tp.width / 2;
+      tp.paint(canvas, Offset(dx, top + h + 3));
+    }
+
+    tick(0, Alignment.centerLeft);
+    tick(totalDuration / 2, Alignment.center);
+    tick(totalDuration, Alignment.centerRight);
+  }
+
+  @override
+  bool shouldRepaint(_PhaseScrubberPainter o) =>
+      o.playhead != playhead ||
+          o.highlighted != highlighted ||
+          o.segments != segments;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tool scrubber painter — one stacked lane per tool
+// ─────────────────────────────────────────────────────────────────────────────
+class _ToolScrubberPainter extends CustomPainter {
+  final List<_ToolOccurrence> occurrences;
+  final double                totalDuration;
+  final double                playhead;
+  final int?                  highlighted;
+
+  static const _laneH   = 7.0;
+  static const _laneGap = 3.0;
+  static const _topPad  = 4.0;
+
+  static const _toolColors = [
+    Color(0xFF4FC3F7), Color(0xFFFFB74D), Color(0xFF81C784),
+    Color(0xFFBA68C8), Color(0xFFF06292), Color(0xFF4DB6AC),
+    Color(0xFFFFD54F),
+  ];
+
+  const _ToolScrubberPainter({
+    required this.occurrences,
+    required this.totalDuration,
+    required this.playhead,
+    this.highlighted,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (totalDuration <= 0 || occurrences.isEmpty) return;
+
+    final tools   = kAllTools
+        .where((t) => occurrences.any((o) => o.tool == t))
+        .toList();
+    final laneMap = {for (int i = 0; i < tools.length; i++) tools[i]: i};
+
+    // Background lanes
+    for (int i = 0; i < tools.length; i++) {
+      final y = _topPad + i * (_laneH + _laneGap);
+      canvas.drawRRect(
+        RRect.fromLTRBR(0, y, size.width, y + _laneH,
+            const Radius.circular(2)),
+        Paint()..color = const Color(0xFF1E2A3A),
+      );
+    }
+
+    // Tool lane labels (tool name on the left)
+    final tp = TextPainter(textDirection: TextDirection.ltr);
+    for (int i = 0; i < tools.length; i++) {
+      final y  = _topPad + i * (_laneH + _laneGap);
+      final ci = kAllTools.indexOf(tools[i]).clamp(0, _toolColors.length - 1);
+      tp.text = TextSpan(
+          text: tools[i],
+          style: TextStyle(
+              color: _toolColors[ci].withOpacity(0.5),
+              fontSize: 7));
+      tp.layout();
+      // Only draw label if it fits in left margin — skip if no margin
+    }
+
+    // Occurrences
+    for (int idx = 0; idx < occurrences.length; idx++) {
+      final occ  = occurrences[idx];
+      final lane = laneMap[occ.tool] ?? 0;
+      final y    = _topPad + lane * (_laneH + _laneGap);
+      final x1   = (occ.startTime / totalDuration) * size.width;
+      final x2   = (occ.endTime   / totalDuration) * size.width;
+      final ci   =
+      kAllTools.indexOf(occ.tool).clamp(0, _toolColors.length - 1);
+      final c    = _toolColors[ci];
+      final hl   = idx == highlighted;
+
+      canvas.drawRRect(
+        RRect.fromLTRBR(
+            x1, y + (hl ? 0 : 1.5),
+            math.max(x1 + 2, x2), y + _laneH - (hl ? 0 : 1.5),
+            const Radius.circular(2)),
+        Paint()..color = c.withOpacity(hl ? 1.0 : 0.65),
+      );
+    }
+
+    // Playhead
+    final px     = (playhead / totalDuration) * size.width;
+    final totalH = _topPad + tools.length * (_laneH + _laneGap);
+    canvas.drawLine(
+      Offset(px, 0),
+      Offset(px, totalH),
+      Paint()
+        ..color       = Colors.white.withOpacity(0.8)
+        ..strokeWidth = 1.5,
+    );
+
+    // Tick labels below
+    void tick(double t, Alignment a) {
+      tp.text = TextSpan(
+          text:
+          '${(t ~/ 60).toString().padLeft(2, '0')}:${(t.toInt() % 60).toString().padLeft(2, '0')}',
+          style: const TextStyle(color: Color(0xFF5A6A7A), fontSize: 9));
+      tp.layout();
+      final x  = (t / totalDuration) * size.width;
+      final dx = a == Alignment.centerLeft
+          ? x
+          : a == Alignment.centerRight
+          ? x - tp.width
+          : x - tp.width / 2;
+      tp.paint(canvas, Offset(dx, totalH + 2));
+    }
+
+    tick(0, Alignment.centerLeft);
+    tick(totalDuration / 2, Alignment.center);
+    tick(totalDuration, Alignment.centerRight);
+  }
+
+  @override
+  bool shouldRepaint(_ToolScrubberPainter o) =>
+      o.playhead != playhead ||
+          o.highlighted != highlighted ||
+          o.occurrences != occurrences;
 }

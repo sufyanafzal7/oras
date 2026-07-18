@@ -59,3 +59,12 @@ desktop.ini
 
 ml/models/
 models/
+
+# Flutter / Android build reports
+app/android/build/
+
+# ML outputs
+ml/outputs/
+
+# Large documentation artifacts (if regenerated)
+folder_structure.txt
