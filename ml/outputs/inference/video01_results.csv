@@ -1,0 +1,201 @@
+frame,frame_idx,tools,tool_count,phase,phase_conf
+000000,0,['grasper'],1,Preparation,0.993
+000025,1,['grasper'],1,Preparation,0.993
+000050,2,['grasper'],1,Preparation,0.992
+000075,3,[],0,Preparation,0.993
+000100,4,[],0,Preparation,0.991
+000125,5,[],0,Preparation,0.992
+000150,6,['grasper'],1,Preparation,0.989
+000175,7,['grasper'],1,Preparation,0.992
+000200,8,['grasper'],1,Preparation,0.988
+000225,9,['grasper'],1,Preparation,0.992
+000250,10,['grasper'],1,Preparation,0.988
+000275,11,['grasper'],1,Preparation,0.99
+000300,12,['grasper'],1,Preparation,0.982
+000325,13,['grasper'],1,Preparation,0.986
+000350,14,['grasper'],1,Preparation,0.98
+000375,15,['grasper'],1,Preparation,0.985
+000400,16,['grasper'],1,Preparation,0.976
+000425,17,['grasper'],1,Preparation,0.981
+000450,18,['scissors'],1,Preparation,0.982
+000475,19,"['hook', 'grasper']",2,Preparation,0.646
+000500,20,['scissors'],1,Preparation,0.98
+000525,21,"['hook', 'scissors']",2,Preparation,0.608
+000550,22,"['scissors', 'hook']",2,Preparation,0.664
+000575,23,"['scissors', 'hook']",2,CalotTriangleDissection,0.694
+000600,24,"['scissors', 'hook']",2,Preparation,0.59
+000625,25,"['scissors', 'hook']",2,CalotTriangleDissection,0.767
+000650,26,"['scissors', 'hook']",2,CalotTriangleDissection,0.651
+000675,27,"['scissors', 'hook']",2,CalotTriangleDissection,0.917
+000700,28,"['scissors', 'hook']",2,CalotTriangleDissection,0.78
+000725,29,"['scissors', 'hook']",2,CalotTriangleDissection,0.929
+000750,30,"['scissors', 'hook']",2,CalotTriangleDissection,0.907
+000775,31,"['scissors', 'hook']",2,CalotTriangleDissection,0.976
+000800,32,"['scissors', 'hook']",2,CalotTriangleDissection,0.922
+000825,33,"['scissors', 'hook']",2,CalotTriangleDissection,0.98
+000850,34,"['scissors', 'hook']",2,CalotTriangleDissection,0.967
+000875,35,"['scissors', 'hook']",2,CalotTriangleDissection,0.995
+000900,36,"['hook', 'clipper']",2,CalotTriangleDissection,0.989
+000925,37,"['scissors', 'hook']",2,CalotTriangleDissection,0.996
+000950,38,"['scissors', 'hook']",2,CalotTriangleDissection,0.994
+000975,39,"['grasper', 'hook']",2,CalotTriangleDissection,0.998
+001000,40,"['grasper', 'hook']",2,CalotTriangleDissection,0.998
+001025,41,"['grasper', 'hook']",2,CalotTriangleDissection,0.998
+001050,42,"['scissors', 'hook']",2,CalotTriangleDissection,0.998
+001075,43,['grasper'],1,CalotTriangleDissection,0.994
+001100,44,"['hook', 'grasper']",2,CalotTriangleDissection,0.998
+001125,45,"['hook', 'scissors']",2,CalotTriangleDissection,0.998
+001150,46,"['hook', 'scissors']",2,CalotTriangleDissection,0.998
+001175,47,"['hook', 'grasper']",2,CalotTriangleDissection,0.998
+001200,48,"['hook', 'grasper']",2,CalotTriangleDissection,0.997
+001225,49,['hook'],1,CalotTriangleDissection,0.996
+001250,50,"['hook', 'bipolar']",2,CalotTriangleDissection,0.997
+001275,51,"['hook', 'grasper']",2,CalotTriangleDissection,0.996
+001300,52,"['hook', 'bipolar']",2,CalotTriangleDissection,0.996
+001325,53,"['hook', 'grasper']",2,CalotTriangleDissection,0.996
+001350,54,"['hook', 'grasper']",2,CalotTriangleDissection,0.997
+001375,55,"['grasper', 'hook']",2,CalotTriangleDissection,0.995
+001400,56,"['grasper', 'hook']",2,CalotTriangleDissection,0.996
+001425,57,"['grasper', 'hook']",2,CalotTriangleDissection,0.995
+001450,58,"['grasper', 'hook']",2,CalotTriangleDissection,0.996
+001475,59,"['grasper', 'hook']",2,CalotTriangleDissection,0.995
+001500,60,"['grasper', 'hook']",2,CalotTriangleDissection,0.996
+001525,61,"['grasper', 'hook']",2,CalotTriangleDissection,0.995
+001550,62,"['grasper', 'hook']",2,CalotTriangleDissection,0.996
+001575,63,"['grasper', 'hook']",2,CalotTriangleDissection,0.996
+001600,64,"['grasper', 'hook']",2,CalotTriangleDissection,0.996
+001625,65,"['grasper', 'hook']",2,CalotTriangleDissection,0.995
+001650,66,"['grasper', 'hook']",2,CalotTriangleDissection,0.996
+001675,67,"['grasper', 'hook']",2,CalotTriangleDissection,0.996
+001700,68,"['grasper', 'hook']",2,CalotTriangleDissection,0.996
+001725,69,"['grasper', 'hook']",2,CalotTriangleDissection,0.995
+001750,70,"['hook', 'grasper']",2,CalotTriangleDissection,0.995
+001775,71,"['grasper', 'hook']",2,CalotTriangleDissection,0.995
+001800,72,"['grasper', 'hook']",2,CalotTriangleDissection,0.995
+001825,73,"['grasper', 'hook']",2,CalotTriangleDissection,0.995
+001850,74,"['grasper', 'hook']",2,CalotTriangleDissection,0.995
+001875,75,"['grasper', 'hook']",2,CalotTriangleDissection,0.994
+001900,76,"['grasper', 'hook']",2,CalotTriangleDissection,0.994
+001925,77,"['grasper', 'hook']",2,CalotTriangleDissection,0.994
+001950,78,"['grasper', 'hook']",2,CalotTriangleDissection,0.994
+001975,79,"['grasper', 'hook']",2,CalotTriangleDissection,0.993
+002000,80,"['grasper', 'hook']",2,CalotTriangleDissection,0.993
+002025,81,"['grasper', 'hook']",2,CalotTriangleDissection,0.992
+002050,82,"['grasper', 'hook']",2,CalotTriangleDissection,0.992
+002075,83,"['grasper', 'hook']",2,CalotTriangleDissection,0.991
+002100,84,"['grasper', 'hook']",2,CalotTriangleDissection,0.991
+002125,85,"['grasper', 'hook']",2,CalotTriangleDissection,0.99
+002150,86,"['grasper', 'hook']",2,CalotTriangleDissection,0.99
+002175,87,"['hook', 'bipolar']",2,CalotTriangleDissection,0.988
+002200,88,"['hook', 'grasper']",2,CalotTriangleDissection,0.988
+002225,89,"['hook', 'bipolar']",2,CalotTriangleDissection,0.986
+002250,90,"['hook', 'bipolar']",2,CalotTriangleDissection,0.984
+002275,91,"['hook', 'grasper']",2,CalotTriangleDissection,0.985
+002300,92,"['grasper', 'hook']",2,CalotTriangleDissection,0.983
+002325,93,"['grasper', 'hook']",2,CalotTriangleDissection,0.981
+002350,94,"['grasper', 'hook']",2,CalotTriangleDissection,0.98
+002375,95,"['grasper', 'hook']",2,CalotTriangleDissection,0.98
+002400,96,"['grasper', 'hook']",2,CalotTriangleDissection,0.977
+002425,97,"['hook', 'grasper']",2,CalotTriangleDissection,0.978
+002450,98,"['grasper', 'hook']",2,CalotTriangleDissection,0.975
+002475,99,"['grasper', 'hook']",2,CalotTriangleDissection,0.975
+002500,100,"['grasper', 'hook']",2,CalotTriangleDissection,0.972
+002525,101,"['grasper', 'hook']",2,CalotTriangleDissection,0.971
+002550,102,"['hook', 'grasper']",2,CalotTriangleDissection,0.969
+002575,103,"['grasper', 'hook']",2,CalotTriangleDissection,0.968
+002600,104,"['grasper', 'hook']",2,CalotTriangleDissection,0.964
+002625,105,"['grasper', 'hook']",2,CalotTriangleDissection,0.962
+002650,106,['hook'],1,CalotTriangleDissection,0.937
+002675,107,['hook'],1,CalotTriangleDissection,0.93
+002700,108,['hook'],1,CalotTriangleDissection,0.924
+002725,109,['hook'],1,CalotTriangleDissection,0.91
+002750,110,['hook'],1,CalotTriangleDissection,0.892
+002775,111,['hook'],1,CalotTriangleDissection,0.866
+002800,112,['hook'],1,CalotTriangleDissection,0.839
+002825,113,['hook'],1,CalotTriangleDissection,0.808
+002850,114,['hook'],1,CalotTriangleDissection,0.765
+002875,115,['hook'],1,CalotTriangleDissection,0.728
+002900,116,['hook'],1,CalotTriangleDissection,0.709
+002925,117,['hook'],1,CalotTriangleDissection,0.67
+002950,118,['hook'],1,CalotTriangleDissection,0.611
+002975,119,['hook'],1,CalotTriangleDissection,0.566
+003000,120,['hook'],1,CalotTriangleDissection,0.532
+003025,121,['hook'],1,CalotTriangleDissection,0.487
+003050,122,['hook'],1,GallbladderDissection,0.533
+003075,123,['hook'],1,GallbladderDissection,0.576
+003100,124,['hook'],1,GallbladderDissection,0.605
+003125,125,['hook'],1,GallbladderDissection,0.638
+003150,126,['hook'],1,GallbladderDissection,0.659
+003175,127,['hook'],1,GallbladderDissection,0.682
+003200,128,['hook'],1,GallbladderDissection,0.699
+003225,129,['hook'],1,GallbladderDissection,0.714
+003250,130,['hook'],1,GallbladderDissection,0.724
+003275,131,"['hook', 'bipolar']",2,GallbladderDissection,0.689
+003300,132,['hook'],1,GallbladderDissection,0.742
+003325,133,['hook'],1,GallbladderDissection,0.736
+003350,134,['hook'],1,GallbladderDissection,0.75
+003375,135,['hook'],1,GallbladderDissection,0.746
+003400,136,"['grasper', 'hook']",2,GallbladderDissection,0.744
+003425,137,"['grasper', 'hook']",2,GallbladderDissection,0.744
+003450,138,"['bipolar', 'hook']",2,GallbladderDissection,0.726
+003475,139,"['hook', 'bipolar']",2,GallbladderDissection,0.688
+003500,140,"['hook', 'grasper']",2,GallbladderDissection,0.751
+003525,141,"['grasper', 'hook']",2,GallbladderDissection,0.754
+003550,142,"['bipolar', 'hook']",2,GallbladderDissection,0.724
+003575,143,"['hook', 'grasper']",2,GallbladderDissection,0.7
+003600,144,"['hook', 'grasper']",2,GallbladderDissection,0.747
+003625,145,"['grasper', 'hook']",2,GallbladderDissection,0.77
+003650,146,"['grasper', 'hook']",2,GallbladderDissection,0.722
+003675,147,"['grasper', 'hook']",2,GallbladderDissection,0.743
+003700,148,"['grasper', 'hook']",2,GallbladderDissection,0.786
+003725,149,"['grasper', 'hook']",2,GallbladderDissection,0.803
+003750,150,"['hook', 'grasper']",2,GallbladderDissection,0.749
+003775,151,"['grasper', 'hook']",2,GallbladderDissection,0.793
+003800,152,"['hook', 'grasper']",2,GallbladderDissection,0.814
+003825,153,"['grasper', 'hook']",2,GallbladderDissection,0.84
+003850,154,"['hook', 'grasper']",2,GallbladderDissection,0.81
+003875,155,"['hook', 'grasper']",2,GallbladderDissection,0.846
+003900,156,"['grasper', 'hook']",2,GallbladderDissection,0.855
+003925,157,"['grasper', 'hook']",2,GallbladderDissection,0.874
+003950,158,"['grasper', 'hook']",2,GallbladderDissection,0.868
+003975,159,"['grasper', 'hook']",2,GallbladderDissection,0.886
+004000,160,"['grasper', 'hook']",2,GallbladderDissection,0.889
+004025,161,"['grasper', 'hook']",2,GallbladderDissection,0.9
+004050,162,"['hook', 'grasper']",2,GallbladderDissection,0.902
+004075,163,"['grasper', 'hook']",2,GallbladderDissection,0.91
+004100,164,"['hook', 'grasper']",2,GallbladderDissection,0.913
+004125,165,['hook'],1,GallbladderDissection,0.924
+004150,166,['hook'],1,GallbladderDissection,0.922
+004175,167,[],0,GallbladderDissection,0.849
+004200,168,['hook'],1,GallbladderDissection,0.917
+004225,169,['hook'],1,GallbladderDissection,0.92
+004250,170,['hook'],1,GallbladderDissection,0.922
+004275,171,['hook'],1,GallbladderDissection,0.927
+004300,172,['hook'],1,GallbladderDissection,0.927
+004325,173,[],0,GallbladderDissection,0.853
+004350,174,[],0,GallbladderDissection,0.828
+004375,175,['hook'],1,GallbladderDissection,0.918
+004400,176,['hook'],1,GallbladderDissection,0.916
+004425,177,['hook'],1,GallbladderDissection,0.913
+004450,178,"['hook', 'grasper']",2,GallbladderDissection,0.924
+004475,179,"['hook', 'grasper']",2,GallbladderDissection,0.927
+004500,180,['hook'],1,GallbladderDissection,0.926
+004525,181,['hook'],1,GallbladderDissection,0.926
+004550,182,['hook'],1,GallbladderDissection,0.934
+004575,183,['hook'],1,GallbladderDissection,0.926
+004600,184,['hook'],1,GallbladderDissection,0.924
+004625,185,['hook'],1,GallbladderDissection,0.924
+004650,186,['hook'],1,GallbladderDissection,0.935
+004675,187,['hook'],1,GallbladderDissection,0.936
+004700,188,['hook'],1,GallbladderDissection,0.933
+004725,189,['hook'],1,GallbladderDissection,0.926
+004750,190,['hook'],1,GallbladderDissection,0.937
+004775,191,['hook'],1,GallbladderDissection,0.94
+004800,192,['hook'],1,GallbladderDissection,0.934
+004825,193,['hook'],1,GallbladderDissection,0.934
+004850,194,['hook'],1,GallbladderDissection,0.943
+004875,195,['hook'],1,GallbladderDissection,0.944
+004900,196,[],0,GallbladderDissection,0.844
+004925,197,['hook'],1,GallbladderDissection,0.934
+004950,198,['hook'],1,GallbladderDissection,0.94
+004975,199,['hook'],1,GallbladderDissection,0.938

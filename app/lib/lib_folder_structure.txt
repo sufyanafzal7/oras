@@ -1,0 +1,31 @@
+lib/
+├── models/
+│   └── procedure.dart
+├── screens/
+│   ├── analysis_screen.dart
+│   ├── dashboard_screen.dart
+│   ├── home_shell.dart
+│   ├── ingestion_screen.dart
+│   ├── placeholder_screen.dart
+│   └── reports_screen.dart
+├── services/
+│   ├── api_service.dart
+│   └── mock_data_service.dart
+├── theme/
+│   ├── app_colors.dart
+│   ├── app_constants.dart
+│   └── app_theme.dart
+├── widgets/
+│   ├── common/
+│   │   ├── oras_app_bar.dart
+│   │   └── oras_bottom_nav.dart
+│   ├── dashboard/
+│   │   ├── metric_card.dart
+│   │   ├── mini_bar_chart.dart
+│   │   ├── phase_timeline_widget.dart
+│   │   └── procedure_card.dart
+│   ├── confidence_gauge_widget.dart
+│   ├── phase_timeline_widget.dart
+│   └── tool_badge_widget.dart
+├── lib_folder_structure.txt
+└── main.dart
