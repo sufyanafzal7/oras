@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'theme/app_theme.dart';
 import 'screens/home_shell.dart';
 import 'screens/analysis_screen.dart';
+import 'package:media_kit/media_kit.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   runApp(const OrasApp());
 }
 

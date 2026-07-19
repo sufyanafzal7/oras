@@ -679,6 +679,8 @@ class _AnalysisScreenState extends State<AnalysisScreen>
             _buildDetectedToolsBadges(),
             const SizedBox(height: 14),
             _buildPhaseDistribution(),
+            const SizedBox(height: 20),
+            _buildActionButtons(),
           ],
         ),
       ),
@@ -1239,6 +1241,50 @@ class _AnalysisScreenState extends State<AnalysisScreen>
               ),
             );
           }),
+      ],
+    );
+  }
+
+  Widget _buildActionButtons() {
+    return Row(
+      children: [
+        Expanded(
+          child: ElevatedButton.icon(
+            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Detailed analysis report — will be implemented in a future build.'),
+                backgroundColor: AppColors.surface,
+              ),
+            ),
+            icon: const Icon(Icons.analytics_outlined, size: 16),
+            label: const Text('Analyze'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.surfaceElevated,
+              foregroundColor: AppColors.accentCyan,
+              side: const BorderSide(color: AppColors.accentCyan),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: ElevatedButton.icon(
+            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Report download — will be implemented in a future build.'),
+                backgroundColor: AppColors.surface,
+              ),
+            ),
+            icon: const Icon(Icons.download_rounded, size: 16),
+            label: const Text('Download'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.surfaceElevated,
+              foregroundColor: AppColors.accentMagenta,
+              side: const BorderSide(color: AppColors.accentMagenta),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+        ),
       ],
     );
   }

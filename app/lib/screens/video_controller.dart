@@ -1,22 +1,22 @@
-// Unified native video controller using the video_player package.
-// Handles Android (contentUri) and Windows/Desktop (file path).
+// Native video controller using media_kit.
+// Supports Android, Windows Desktop, macOS, Linux.
 // NOT used on web — web video goes through WebVideoHelper (dart:html).
 
-import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:video_player/video_player.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart'
+as mk show VideoController, Video;
 
 class VideoController {
-  VideoPlayerController? _ctrl;
+  Player?          _player;
+  mk.VideoController? _mkCtrl;
   bool _initialized = false;
 
   VoidCallback? _onTimeUpdate;
   VoidCallback? _onEnded;
   VoidCallback? _onCanPlay;
 
-  // Call once from initState on all platforms (safe no-op on web since
-  // analysis_screen.dart only calls loadFile/play/pause on native).
   void init({
     required VoidCallback onTimeUpdate,
     required VoidCallback onEnded,
@@ -25,75 +25,52 @@ class VideoController {
     _onTimeUpdate = onTimeUpdate;
     _onEnded      = onEnded;
     _onCanPlay    = onCanPlay;
+
+    _player = Player();
+    _mkCtrl = mk.VideoController(_player!);
+
+    _player!.stream.position.listen((_) => _onTimeUpdate?.call());
+    _player!.stream.completed.listen((done) {
+      if (done) _onEnded?.call();
+    });
   }
 
-  // Async — must be awaited before calling play/pause/seekTo.
   Future<void> loadFile(PlatformFile file) async {
-    await _disposeController();
-
-    late VideoPlayerController c;
-
-    if (Platform.isAndroid || Platform.isIOS) {
-      // file_picker on Android returns a content:// URI in file.path
-      c = VideoPlayerController.contentUri(
-          Uri.parse(file.path ?? ''));
-    } else {
-      // Windows, macOS, Linux — real filesystem path
-      c = VideoPlayerController.file(File(file.path!));
-    }
-
-    _ctrl = c;
-
-    c.addListener(() {
-      if (!_initialized) return;
-      _onTimeUpdate?.call();
-      final val = c.value;
-      if (val.position >= val.duration &&
-          val.duration.inMilliseconds > 0 &&
-          !val.isPlaying) {
-        _onEnded?.call();
-      }
-    });
-
-    await c.initialize();
+    if (_player == null) return;
+    _initialized = false;
+    final path = file.path!;
+    // file:/// prefix required on Windows; works on all platforms
+    await _player!.open(Media('file:///$path'), play: false);
     _initialized = true;
     _onCanPlay?.call();
   }
 
-  // Position in seconds (double).
   double get currentTimeSeconds =>
-      (_ctrl?.value.position.inMilliseconds ?? 0) / 1000.0;
+      (_player?.state.position.inMilliseconds ?? 0) / 1000.0;
 
-  // Aspect ratio for AspectRatio widget — defaults to 16:9 before init.
-  double get aspectRatio =>
-      (_initialized && _ctrl != null)
-          ? _ctrl!.value.aspectRatio
-          : 16 / 9;
-
-  bool get isInitialized =>
-      _initialized && (_ctrl?.value.isInitialized ?? false);
-
-  void play()  => _ctrl?.play();
-  void pause() => _ctrl?.pause();
-
-  void seekTo(double seconds) {
-    _ctrl?.seekTo(
-        Duration(milliseconds: (seconds * 1000).toInt()));
+  double get aspectRatio {
+    final w = _player?.state.width;
+    final h = _player?.state.height;
+    if (w != null && h != null && h > 0) return w / h;
+    return 16 / 9;
   }
 
-  // Returns the VideoPlayer widget; SizedBox.shrink() if not ready.
+  bool get isInitialized => _initialized;
+
+  void play()  => _player?.play();
+  void pause() => _player?.pause();
+
+  void seekTo(double seconds) =>
+      _player?.seek(Duration(milliseconds: (seconds * 1000).toInt()));
+
   Widget buildView() {
-    if (!isInitialized || _ctrl == null) return const SizedBox.shrink();
-    return VideoPlayer(_ctrl!);
-  }
-
-  Future<void> _disposeController() async {
-    _initialized = false;
-    await _ctrl?.dispose();
-    _ctrl = null;
+    if (!_initialized || _mkCtrl == null) return const SizedBox.shrink();
+    return mk.Video(controller: _mkCtrl!);
   }
 
   Future<void> dispose() async {
-    await _disposeController();
+    await _player?.dispose();
+    _player = null;
+    _mkCtrl = null;
   }
 }
