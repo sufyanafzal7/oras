@@ -1,8 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart'
-    show kIsWeb, defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 
@@ -11,9 +10,12 @@ import '../theme/app_colors.dart';
 import '../theme/app_constants.dart';
 import '../widgets/confidence_gauge_widget.dart';
 import '../widgets/tool_badge_widget.dart';
-
-// Cross-platform video controller — no dart:html in this file
 import 'video_controller.dart';
+
+// Web-only imports — wrapped so native compiler never sees dart:html.
+// ignore: avoid_web_libraries_in_flutter
+import 'video_web_helper.dart'
+if (dart.library.io) 'video_web_helper_stub.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Data models
@@ -80,10 +82,13 @@ class _AnalysisScreenState extends State<AnalysisScreen>
   int? _highlightedPhase;
   int? _highlightedTool;
 
-  // ── Video controller ──────────────────────────────────────────────────────
+  // ── Native video controller (Android + Windows) ───────────────────────────
   late final VideoController _video;
-  final String _videoViewId =
-      'oras-video-${DateTime.now().millisecondsSinceEpoch}';
+
+  // ── Web video (HtmlElementView) — managed by video_web_helper.dart ────────
+  // On web: WebVideoHelper is the real impl; on native: it's a no-op stub.
+  final WebVideoHelper _webVideo = WebVideoHelper();
+  bool _webVideoReady = false;
 
   // ── Resizable columns ─────────────────────────────────────────────────────
   static const double _minFrac = 0.14;
@@ -94,6 +99,9 @@ class _AnalysisScreenState extends State<AnalysisScreen>
   // ── Pulse animation ────────────────────────────────────────────────────────
   late AnimationController _pulseCtrl;
   late Animation<double>   _pulseAnim;
+
+  // Ticker for polling native video position
+  Timer? _positionTicker;
 
   // ─────────────────────────────────────────────────────────────────────────
   // Lifecycle
@@ -109,14 +117,25 @@ class _AnalysisScreenState extends State<AnalysisScreen>
       CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
     );
 
-    _video = VideoController(viewId: _videoViewId);
+    // Native controller — init always (no-op on web path)
+    _video = VideoController();
+    _video.init(
+      onTimeUpdate: _onNativeTimeUpdate,
+      onEnded: () { if (mounted) setState(() => _isPlaying = false); },
+      onCanPlay: () {
+        if (mounted) setState(() => _videoReady = true);
+      },
+    );
+
+    // Web helper — registers the HtmlElementView factory on web only
     if (kIsWeb) {
-      _video.init(
-        onTimeUpdate: _onVideoTimeUpdate,
+      _webVideo.init(
+        onTimeUpdate: _onWebTimeUpdate,
         onEnded: () { if (mounted) setState(() => _isPlaying = false); },
-        onCanPlay: () { if (mounted) setState(() => _videoReady = true); },
+        onCanPlay: () { if (mounted) setState(() => _webVideoReady = true); },
       );
     }
+
     _checkConnection();
   }
 
@@ -125,16 +144,26 @@ class _AnalysisScreenState extends State<AnalysisScreen>
     _pulseCtrl.dispose();
     _pollSub?.cancel();
     _playhead.dispose();
+    _positionTicker?.cancel();
     _video.dispose();
+    _webVideo.dispose();
     super.dispose();
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   // Video callbacks
   // ─────────────────────────────────────────────────────────────────────────
-  void _onVideoTimeUpdate() {
+  void _onNativeTimeUpdate() {
     if (!mounted) return;
-    final t = _video.currentTime;
+    final t = _video.currentTimeSeconds;
+    _playhead.value = t;
+    _syncHighlights(t);
+    if (mounted) setState(() {});
+  }
+
+  void _onWebTimeUpdate() {
+    if (!mounted) return;
+    final t = _webVideo.currentTime;
     _playhead.value = t;
     _syncHighlights(t);
   }
@@ -163,15 +192,19 @@ class _AnalysisScreenState extends State<AnalysisScreen>
   void _seekTo(double seconds) {
     final double t = seconds.clamp(0.0, math.max(_totalDuration, 1.0));
     _playhead.value = t;
-    _video.seekTo(t);
+    if (kIsWeb) {
+      _webVideo.seekTo(t);
+    } else {
+      _video.seekTo(t);
+    }
     _syncHighlights(t);
   }
 
   void _togglePlay() {
     if (_isPlaying) {
-      _video.pause();
+      kIsWeb ? _webVideo.pause() : _video.pause();
     } else {
-      _video.play();
+      kIsWeb ? _webVideo.play() : _video.play();
     }
     setState(() => _isPlaying = !_isPlaying);
   }
@@ -192,10 +225,10 @@ class _AnalysisScreenState extends State<AnalysisScreen>
     );
     if (result == null) return;
     final file = result.files.single;
-    if (kIsWeb) _video.loadFile(file);
+
     setState(() {
       _selectedFile     = file;
-      _statusMsg        = 'Loaded: ${file.name}';
+      _statusMsg        = 'Loading: ${file.name}…';
       _segments         = [];
       _toolOccurrences  = [];
       _activeTools      = [];
@@ -204,11 +237,35 @@ class _AnalysisScreenState extends State<AnalysisScreen>
       _totalDuration    = 0.0;
       _progress         = 0.0;
       _videoReady       = false;
+      _webVideoReady    = false;
       _isPlaying        = false;
       _highlightedPhase = null;
       _highlightedTool  = null;
     });
     _playhead.value = 0.0;
+    _positionTicker?.cancel();
+
+    if (kIsWeb) {
+      _webVideo.loadFile(file);
+    } else {
+      // loadFile is async on native (initializes VideoPlayerController)
+      await _video.loadFile(file);
+      // Start a 250ms ticker to push position updates to the scrubber
+      _positionTicker = Timer.periodic(
+        const Duration(milliseconds: 250),
+            (_) {
+          if (!mounted) return;
+          final t = _video.currentTimeSeconds;
+          if ((t - _playhead.value).abs() > 0.1) {
+            _playhead.value = t;
+            _syncHighlights(t);
+            if (mounted) setState(() {});
+          }
+        },
+      );
+    }
+
+    setState(() => _statusMsg = 'Loaded: ${file.name}');
   }
 
   Future<void> _startAnalysis() async {
@@ -243,10 +300,8 @@ class _AnalysisScreenState extends State<AnalysisScreen>
   void _handleUpdate(Map<String, dynamic> data) {
     if (!mounted) return;
     setState(() {
-      final newProg =
-          (data['progress'] as num?)?.toDouble() ?? _progress;
+      final newProg = (data['progress'] as num?)?.toDouble() ?? _progress;
 
-      // ETA calculation
       if (newProg > 0.0 && _analysisStartTime == null) {
         _analysisStartTime = DateTime.now();
       }
@@ -254,16 +309,14 @@ class _AnalysisScreenState extends State<AnalysisScreen>
         final elapsed  =
             DateTime.now().difference(_analysisStartTime!).inSeconds;
         final totalEst = elapsed / newProg;
-        final rem      =
+        final rem =
         (totalEst - elapsed).clamp(0, double.infinity).toInt();
-        _etaString = rem < 60
-            ? 'ETA ~${rem}s'
-            : 'ETA ~${rem ~/ 60}m ${rem % 60}s';
+        _etaString =
+        rem < 60 ? 'ETA ~${rem}s' : 'ETA ~${rem ~/ 60}m ${rem % 60}s';
       }
 
       _progress  = newProg;
-      _statusMsg =
-      'Processing… ${(_progress * 100).toStringAsFixed(0)}%';
+      _statusMsg = 'Processing… ${(_progress * 100).toStringAsFixed(0)}%';
 
       if (data['status'] == 'done') {
         _isAnalyzing = false;
@@ -276,7 +329,6 @@ class _AnalysisScreenState extends State<AnalysisScreen>
         return;
       }
 
-      // Progressive partial view while still processing
       if (data['status'] == 'processing') {
         final raw = data['result'] as Map<String, dynamic>?;
         if (raw != null) _applyPartialResult(raw, newProg);
@@ -288,10 +340,8 @@ class _AnalysisScreenState extends State<AnalysisScreen>
     });
   }
 
-  /// Applied when status == 'done' — full result.
   void _applyResult(Map<String, dynamic> raw) {
-    _totalDuration =
-        (raw['duration'] as num?)?.toDouble() ?? 0.0;
+    _totalDuration = (raw['duration'] as num?)?.toDouble() ?? 0.0;
 
     _segments = (raw['phase_timeline'] as List).map((p) {
       final m = p as Map<String, dynamic>;
@@ -315,13 +365,11 @@ class _AnalysisScreenState extends State<AnalysisScreen>
     }
   }
 
-  /// Applied during polling — slice data by progress fraction.
   void _applyPartialResult(Map<String, dynamic> raw, double prog) {
     if (raw.containsKey('phase_timeline')) {
       final all  = raw['phase_timeline'] as List;
-      final show =
-      (all.length * prog).ceil().clamp(0, all.length);
-      _segments = all.take(show).map((p) {
+      final show = (all.length * prog).ceil().clamp(0, all.length);
+      _segments  = all.take(show).map((p) {
         final m = p as Map<String, dynamic>;
         return _PhaseSegment(
           phase:     m['phase']      as String,
@@ -344,12 +392,6 @@ class _AnalysisScreenState extends State<AnalysisScreen>
     }
   }
 
-  /// Derives tool timeline from phase segments.
-  /// Each tool gets one occurrence per phase segment where it is "active".
-  /// The backend returns only total frame counts per tool, not per-frame
-  /// timestamps. We approximate per-phase tool presence by distributing
-  /// tool occurrences across phase segments using alternating assignment.
-  /// Replace this with real per-frame timestamps if the backend is extended.
   List<_ToolOccurrence> _deriveToolOccurrences(
       List<_PhaseSegment> segs, List<String> tools) {
     if (segs.isEmpty || tools.isEmpty) return [];
@@ -357,7 +399,6 @@ class _AnalysisScreenState extends State<AnalysisScreen>
     for (final tool in tools) {
       final toolIdx = kAllTools.indexOf(tool);
       for (int i = 0; i < segs.length; i++) {
-        // Alternate assignment so not all tools appear in every segment
         if ((i + toolIdx) % 2 == 0) {
           occs.add(_ToolOccurrence(
             tool:      tool,
@@ -388,9 +429,7 @@ class _AnalysisScreenState extends State<AnalysisScreen>
           _buildTopBar(),
           Expanded(
             child: LayoutBuilder(builder: (ctx, constraints) {
-              if (constraints.maxWidth < 640) {
-                return _buildMobileLayout();
-              }
+              if (constraints.maxWidth < 640) return _buildMobileLayout();
               return _buildDesktopLayout(constraints.maxWidth);
             }),
           ),
@@ -405,46 +444,31 @@ class _AnalysisScreenState extends State<AnalysisScreen>
   Widget _buildDesktopLayout(double totalWidth) {
     final leftW  = totalWidth * _leftFrac;
     final rightW = totalWidth * _rightFrac;
-
     return Row(
       children: [
-        // Left: Tool event log
         SizedBox(width: leftW, child: _buildToolPanel()),
-
-        // Drag handle — left / center
         _DragHandle(onDrag: (dx) {
           setState(() {
             final delta   = dx / totalWidth;
             final newLeft = (_leftFrac + delta).clamp(_minFrac, _maxFrac);
-            // Only allow if center won't shrink below minFrac
-            if (1.0 - newLeft - _rightFrac >= _minFrac) {
-              _leftFrac = newLeft;
-            }
+            if (1.0 - newLeft - _rightFrac >= _minFrac) _leftFrac = newLeft;
           });
         }),
-
-        // Center: video + scrubbers + controls
         Expanded(child: _buildCenterPanel()),
-
-        // Drag handle — center / right
         _DragHandle(onDrag: (dx) {
           setState(() {
             final delta    = dx / totalWidth;
             final newRight = (_rightFrac - delta).clamp(_minFrac, _maxFrac);
-            if (1.0 - _leftFrac - newRight >= _minFrac) {
-              _rightFrac = newRight;
-            }
+            if (1.0 - _leftFrac - newRight >= _minFrac) _rightFrac = newRight;
           });
         }),
-
-        // Right: Phase event log
         SizedBox(width: rightW, child: _buildPhasePanel()),
       ],
     );
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Mobile single-scroll layout
+  // Mobile layout
   // ─────────────────────────────────────────────────────────────────────────
   Widget _buildMobileLayout() {
     return SingleChildScrollView(
@@ -468,13 +492,13 @@ class _AnalysisScreenState extends State<AnalysisScreen>
           const SizedBox(height: 16),
           _sectionLabel('TOOL TIMELINE'),
           const SizedBox(height: 8),
-          ..._toolOccurrences.asMap().entries.map(
-                  (e) => _buildToolEventEntry(e.key, e.value)),
+          ..._toolOccurrences.asMap().entries
+              .map((e) => _buildToolEventEntry(e.key, e.value)),
           const SizedBox(height: 16),
           _sectionLabel('EVENT LOG'),
           const SizedBox(height: 8),
-          ..._segments.asMap().entries.map(
-                  (e) => _buildPhaseEventEntry(e.key, e.value)),
+          ..._segments.asMap().entries
+              .map((e) => _buildPhaseEventEntry(e.key, e.value)),
         ],
       ),
     );
@@ -577,7 +601,6 @@ class _AnalysisScreenState extends State<AnalysisScreen>
   Widget _buildToolEventEntry(int index, _ToolOccurrence occ) {
     final color = _toolColor(occ.tool);
     final isHl  = index == _highlightedTool;
-
     return GestureDetector(
       onTap: () {
         setState(() => _highlightedTool = index);
@@ -595,44 +618,39 @@ class _AnalysisScreenState extends State<AnalysisScreen>
             width: isHl ? 1.5 : 1.0,
           ),
         ),
-        child: Row(
-          children: [
-            Column(children: [
-              Container(
-                  width: 7,
-                  height: 7,
-                  decoration: BoxDecoration(
-                      color: color, shape: BoxShape.circle)),
-              if (index < _toolOccurrences.length - 1)
-                Container(
-                    width: 1, height: 22, color: AppColors.border),
-            ]),
-            const SizedBox(width: 7),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(occ.tool,
-                      style: TextStyle(
-                          color:
-                          isHl ? color : AppColors.textPrimary,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 1),
-                  Text(
-                    '${_fmt(occ.startTime)} → ${_fmt(occ.endTime)}'
-                        '  (${_fmt(occ.duration)})',
-                    style: const TextStyle(
-                        color: AppColors.textMuted, fontSize: 10),
-                  ),
-                ],
-              ),
+        child: Row(children: [
+          Column(children: [
+            Container(
+                width: 7, height: 7,
+                decoration:
+                BoxDecoration(color: color, shape: BoxShape.circle)),
+            if (index < _toolOccurrences.length - 1)
+              Container(width: 1, height: 22, color: AppColors.border),
+          ]),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(occ.tool,
+                    style: TextStyle(
+                        color: isHl ? color : AppColors.textPrimary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 1),
+                Text(
+                  '${_fmt(occ.startTime)} → ${_fmt(occ.endTime)}'
+                      '  (${_fmt(occ.duration)})',
+                  style: const TextStyle(
+                      color: AppColors.textMuted, fontSize: 10),
+                ),
+              ],
             ),
-            Icon(Icons.skip_next_rounded,
-                size: 12,
-                color: isHl ? color : AppColors.textMuted),
-          ],
-        ),
+          ),
+          Icon(Icons.skip_next_rounded,
+              size: 12,
+              color: isHl ? color : AppColors.textMuted),
+        ]),
       ),
     );
   }
@@ -707,7 +725,6 @@ class _AnalysisScreenState extends State<AnalysisScreen>
   Widget _buildPhaseEventEntry(int index, _PhaseSegment seg) {
     final color = kPhaseColors[seg.phase] ?? AppColors.textMuted;
     final isHl  = index == _highlightedPhase;
-
     return GestureDetector(
       onTap: () {
         setState(() => _highlightedPhase = index);
@@ -725,44 +742,39 @@ class _AnalysisScreenState extends State<AnalysisScreen>
             width: isHl ? 1.5 : 1.0,
           ),
         ),
-        child: Row(
-          children: [
-            Column(children: [
-              Container(
-                  width: 7,
-                  height: 7,
-                  decoration: BoxDecoration(
-                      color: color, shape: BoxShape.circle)),
-              if (index < _segments.length - 1)
-                Container(
-                    width: 1, height: 22, color: AppColors.border),
-            ]),
-            const SizedBox(width: 7),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(seg.phase,
-                      style: TextStyle(
-                          color:
-                          isHl ? color : AppColors.textPrimary,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 1),
-                  Text(
-                    '${_fmt(seg.startTime)} → ${_fmt(seg.endTime)}'
-                        '  (${_fmt(seg.duration)})',
-                    style: const TextStyle(
-                        color: AppColors.textMuted, fontSize: 10),
-                  ),
-                ],
-              ),
+        child: Row(children: [
+          Column(children: [
+            Container(
+                width: 7, height: 7,
+                decoration:
+                BoxDecoration(color: color, shape: BoxShape.circle)),
+            if (index < _segments.length - 1)
+              Container(width: 1, height: 22, color: AppColors.border),
+          ]),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(seg.phase,
+                    style: TextStyle(
+                        color: isHl ? color : AppColors.textPrimary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 1),
+                Text(
+                  '${_fmt(seg.startTime)} → ${_fmt(seg.endTime)}'
+                      '  (${_fmt(seg.duration)})',
+                  style: const TextStyle(
+                      color: AppColors.textMuted, fontSize: 10),
+                ),
+              ],
             ),
-            Icon(Icons.skip_next_rounded,
-                size: 12,
-                color: isHl ? color : AppColors.textMuted),
-          ],
-        ),
+          ),
+          Icon(Icons.skip_next_rounded,
+              size: 12,
+              color: isHl ? color : AppColors.textMuted),
+        ]),
       ),
     );
   }
@@ -771,6 +783,10 @@ class _AnalysisScreenState extends State<AnalysisScreen>
   // VIDEO PLAYER CARD
   // ─────────────────────────────────────────────────────────────────────────
   Widget _buildVideoPlayerCard() {
+    final bool hasVideo = _selectedFile != null;
+    // Determine readiness per platform
+    final bool ready = kIsWeb ? _webVideoReady : _videoReady;
+
     return Container(
       height: 200,
       decoration: BoxDecoration(
@@ -781,17 +797,26 @@ class _AnalysisScreenState extends State<AnalysisScreen>
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
-          if (kIsWeb && _selectedFile != null)
-            _video.buildView()
-          else
-            _buildVideoPlaceholder(),
-
-          if (kIsWeb && _selectedFile != null && !_videoReady)
+          // ── Video content
+          if (!hasVideo)
+            _buildVideoPlaceholder(false)
+          else if (!ready)
             const Center(
                 child: CircularProgressIndicator(
-                    color: AppColors.accentCyan)),
+                    color: AppColors.accentCyan))
+          else if (kIsWeb)
+              _webVideo.buildView()
+            else
+            // Native: AspectRatio keeps the video proportional inside the card
+              Center(
+                child: AspectRatio(
+                  aspectRatio: _video.aspectRatio,
+                  child: _video.buildView(),
+                ),
+              ),
 
-          if (kIsWeb && _selectedFile != null)
+          // ── Overlay controls (shown once video is ready)
+          if (hasVideo && ready)
             Positioned(
               bottom: 0, left: 0, right: 0,
               child: _buildVideoOverlayControls(),
@@ -801,40 +826,20 @@ class _AnalysisScreenState extends State<AnalysisScreen>
     );
   }
 
-  Widget _buildVideoPlaceholder() {
+  Widget _buildVideoPlaceholder(bool loading) {
     return Container(
       alignment: Alignment.center,
       color: AppColors.surface,
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(
-          _selectedFile != null
-              ? Icons.movie_outlined
-              : Icons.videocam_off_outlined,
-          color: AppColors.textMuted,
-          size: 30,
-        ),
+        Icon(Icons.videocam_off_outlined,
+            color: AppColors.textMuted, size: 30),
         const SizedBox(height: 8),
         Text(
-          _selectedFile != null
-              ? (kIsWeb
-              ? 'Preparing video…'
-              : 'Video playback available on web build.\n'
-              'Scrubber & event log work via timestamps.')
-              : 'Select a video file to begin',
+          loading ? 'Loading video…' : 'Select a video file to begin',
           textAlign: TextAlign.center,
           style: const TextStyle(
               color: AppColors.textMuted, fontSize: 11, height: 1.5),
         ),
-        if (!kIsWeb && _selectedFile != null) ...[
-          const SizedBox(height: 6),
-          const Text(
-            'flutter run -d web-server --web-port=8080',
-            style: TextStyle(
-                color: AppColors.accentCyan,
-                fontSize: 10,
-                fontFamily: 'monospace'),
-          ),
-        ],
       ]),
     );
   }
@@ -851,14 +856,10 @@ class _AnalysisScreenState extends State<AnalysisScreen>
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Row(children: [
         GestureDetector(
-          onTap: _videoReady ? _togglePlay : null,
+          onTap: _togglePlay,
           child: Icon(
-            _isPlaying
-                ? Icons.pause_rounded
-                : Icons.play_arrow_rounded,
-            color: _videoReady
-                ? AppColors.accentCyan
-                : AppColors.textMuted,
+            _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            color: AppColors.accentCyan,
             size: 22,
           ),
         ),
@@ -930,15 +931,14 @@ class _AnalysisScreenState extends State<AnalysisScreen>
     if (_toolOccurrences.isEmpty) {
       return _scrubberPlaceholder('Tool scrubber — appears after analysis');
     }
-
-    // Number of unique tools that have occurrences
-    final activeToolSet = _toolOccurrences.map((o) => o.tool).toSet();
-    // Height: one lane per tool (7px lane + 3px gap) + top/bottom padding
-    final laneH   = 7.0;
-    final laneGap = 3.0;
-    final topPad  = 4.0;
-    final botPad  = 18.0; // space for tick labels
-    final canvasH = topPad + activeToolSet.length * (laneH + laneGap) + botPad;
+    final activeToolSet =
+    _toolOccurrences.map((o) => o.tool).toSet();
+    const laneH  = 7.0;
+    const laneGap = 3.0;
+    const topPad  = 4.0;
+    const botPad  = 18.0;
+    final canvasH =
+        topPad + activeToolSet.length * (laneH + laneGap) + botPad;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -971,8 +971,7 @@ class _AnalysisScreenState extends State<AnalysisScreen>
           runSpacing: 4,
           children: kAllTools
               .where((t) => _activeTools.contains(t))
-              .map((t) =>
-              _LegendDot(label: t, color: _toolColor(t)))
+              .map((t) => _LegendDot(label: t, color: _toolColor(t)))
               .toList(),
         ),
       ],
@@ -1029,8 +1028,7 @@ class _AnalysisScreenState extends State<AnalysisScreen>
                     : null,
                 icon: _isAnalyzing
                     ? const SizedBox(
-                    width: 13,
-                    height: 13,
+                    width: 13, height: 13,
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: Colors.black))
                     : const Icon(Icons.play_arrow_rounded, size: 16),
@@ -1136,8 +1134,7 @@ class _AnalysisScreenState extends State<AnalysisScreen>
       ),
       child: Row(children: [
         Container(
-            width: 4,
-            height: 48,
+            width: 4, height: 48,
             decoration: BoxDecoration(
                 color: color,
                 borderRadius: BorderRadius.circular(2))),
@@ -1204,8 +1201,7 @@ class _AnalysisScreenState extends State<AnalysisScreen>
         if (totals.isEmpty)
           Text('No data yet',
               style: TextStyle(
-                  color: Colors.white.withOpacity(0.2),
-                  fontSize: 13))
+                  color: Colors.white.withOpacity(0.2), fontSize: 13))
         else
           ...totals.entries.map((e) {
             final color = kPhaseColors[e.key] ?? AppColors.textMuted;
@@ -1277,14 +1273,12 @@ class _AnalysisScreenState extends State<AnalysisScreen>
   );
 
   Widget _emptyHint(String text) => Center(
-    child: Text(
-      text,
-      textAlign: TextAlign.center,
-      style: TextStyle(
-          color: Colors.white.withOpacity(0.18),
-          fontSize: 12,
-          height: 1.6),
-    ),
+    child: Text(text,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+            color: Colors.white.withOpacity(0.18),
+            fontSize: 12,
+            height: 1.6)),
   );
 }
 
@@ -1318,8 +1312,7 @@ class _DragHandleState extends State<_DragHandle> {
               : Colors.transparent,
           child: Center(
             child: Container(
-              width: 2,
-              height: 28,
+              width: 2, height: 28,
               decoration: BoxDecoration(
                 color: _hovering
                     ? AppColors.accentCyan.withOpacity(0.8)
@@ -1346,8 +1339,7 @@ class _LegendDot extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Container(
-          width: 7,
-          height: 7,
+          width: 7, height: 7,
           decoration:
           BoxDecoration(color: color, shape: BoxShape.circle)),
       const SizedBox(width: 4),
@@ -1382,9 +1374,8 @@ class _PhaseScrubberPainter extends CustomPainter {
     const r   = Radius.circular(3);
 
     canvas.drawRRect(
-      RRect.fromLTRBR(0, top, size.width, top + h, r),
-      Paint()..color = const Color(0xFF1E2A3A),
-    );
+        RRect.fromLTRBR(0, top, size.width, top + h, r),
+        Paint()..color = const Color(0xFF1E2A3A));
 
     for (int i = 0; i < segments.length; i++) {
       final s   = segments[i];
@@ -1401,7 +1392,6 @@ class _PhaseScrubberPainter extends CustomPainter {
       );
     }
 
-    // Playhead
     final px = (playhead / totalDuration) * size.width;
     canvas.drawLine(Offset(px, top - 3), Offset(px, top + h + 3),
         Paint()
@@ -1414,12 +1404,11 @@ class _PhaseScrubberPainter extends CustomPainter {
       ..close();
     canvas.drawPath(path, Paint()..color = Colors.white);
 
-    // Tick labels
     final tp = TextPainter(textDirection: TextDirection.ltr);
     void tick(double t, Alignment a) {
       tp.text = TextSpan(
-          text:
-          '${(t ~/ 60).toString().padLeft(2, '0')}:${(t.toInt() % 60).toString().padLeft(2, '0')}',
+          text: '${(t ~/ 60).toString().padLeft(2, '0')}:'
+              '${(t.toInt() % 60).toString().padLeft(2, '0')}',
           style: const TextStyle(
               color: Color(0xFF5A6A7A), fontSize: 9));
       tp.layout();
@@ -1479,7 +1468,6 @@ class _ToolScrubberPainter extends CustomPainter {
         .toList();
     final laneMap = {for (int i = 0; i < tools.length; i++) tools[i]: i};
 
-    // Background lanes
     for (int i = 0; i < tools.length; i++) {
       final y = _topPad + i * (_laneH + _laneGap);
       canvas.drawRRect(
@@ -1489,21 +1477,6 @@ class _ToolScrubberPainter extends CustomPainter {
       );
     }
 
-    // Tool lane labels (tool name on the left)
-    final tp = TextPainter(textDirection: TextDirection.ltr);
-    for (int i = 0; i < tools.length; i++) {
-      final y  = _topPad + i * (_laneH + _laneGap);
-      final ci = kAllTools.indexOf(tools[i]).clamp(0, _toolColors.length - 1);
-      tp.text = TextSpan(
-          text: tools[i],
-          style: TextStyle(
-              color: _toolColors[ci].withOpacity(0.5),
-              fontSize: 7));
-      tp.layout();
-      // Only draw label if it fits in left margin — skip if no margin
-    }
-
-    // Occurrences
     for (int idx = 0; idx < occurrences.length; idx++) {
       final occ  = occurrences[idx];
       final lane = laneMap[occ.tool] ?? 0;
@@ -1514,7 +1487,6 @@ class _ToolScrubberPainter extends CustomPainter {
       kAllTools.indexOf(occ.tool).clamp(0, _toolColors.length - 1);
       final c    = _toolColors[ci];
       final hl   = idx == highlighted;
-
       canvas.drawRRect(
         RRect.fromLTRBR(
             x1, y + (hl ? 0 : 1.5),
@@ -1524,22 +1496,20 @@ class _ToolScrubberPainter extends CustomPainter {
       );
     }
 
-    // Playhead
     final px     = (playhead / totalDuration) * size.width;
     final totalH = _topPad + tools.length * (_laneH + _laneGap);
     canvas.drawLine(
-      Offset(px, 0),
-      Offset(px, totalH),
+      Offset(px, 0), Offset(px, totalH),
       Paint()
         ..color       = Colors.white.withOpacity(0.8)
         ..strokeWidth = 1.5,
     );
 
-    // Tick labels below
+    final tp = TextPainter(textDirection: TextDirection.ltr);
     void tick(double t, Alignment a) {
       tp.text = TextSpan(
-          text:
-          '${(t ~/ 60).toString().padLeft(2, '0')}:${(t.toInt() % 60).toString().padLeft(2, '0')}',
+          text: '${(t ~/ 60).toString().padLeft(2, '0')}:'
+              '${(t.toInt() % 60).toString().padLeft(2, '0')}',
           style: const TextStyle(color: Color(0xFF5A6A7A), fontSize: 9));
       tp.layout();
       final x  = (t / totalDuration) * size.width;

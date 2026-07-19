@@ -1,5 +1,7 @@
-// Web implementation — dart:html and dart:ui_web are only compiled on web targets.
-// Do NOT import this file directly; import video_controller.dart instead.
+// Web-only implementation using dart:html + dart:ui_web.
+// Only compiled on web targets via the conditional import in analysis_screen.dart:
+//   import 'video_web_helper.dart'
+//       if (dart.library.io) 'video_web_helper_stub.dart';
 
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
@@ -9,27 +11,31 @@ import 'dart:ui_web' as ui_web;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/widgets.dart';
 
-class VideoController {
+class WebVideoHelper {
   html.VideoElement? _el;
   String? _objectUrl;
-  final String viewId;
+  final String _viewId =
+      'oras-web-video-${DateTime.now().millisecondsSinceEpoch}';
 
-  VideoController({required this.viewId});
+  bool _registered = false;
 
-  /// Call once from initState on web.
   void init({
     required VoidCallback onTimeUpdate,
     required VoidCallback onEnded,
     required VoidCallback onCanPlay,
   }) {
     _el = html.VideoElement()
-      ..style.width = '100%'
-      ..style.height = '100%'
-      ..style.objectFit = 'contain'
+      ..style.width           = '100%'
+      ..style.height          = '100%'
+      ..style.objectFit       = 'contain'
       ..style.backgroundColor = '#0A0D12'
-      ..controls = false;
+      ..controls              = false;
 
-    ui_web.platformViewRegistry.registerViewFactory(viewId, (_) => _el!);
+    if (!_registered) {
+      ui_web.platformViewRegistry
+          .registerViewFactory(_viewId, (_) => _el!);
+      _registered = true;
+    }
 
     _el!.onTimeUpdate.listen((_) => onTimeUpdate());
     _el!.onEnded.listen((_) => onEnded());
@@ -39,7 +45,7 @@ class VideoController {
   double get currentTime => _el?.currentTime.toDouble() ?? 0.0;
 
   void loadFile(PlatformFile file) {
-    if (_el == null) return;
+    if (_el == null || file.bytes == null) return;
     _revokeOldUrl();
     final blob = html.Blob([file.bytes!]);
     _objectUrl = html.Url.createObjectUrlFromBlob(blob);
@@ -48,9 +54,12 @@ class VideoController {
 
   void play()  => _el?.play();
   void pause() => _el?.pause();
+
   void seekTo(double seconds) {
     if (_el != null) _el!.currentTime = seconds;
   }
+
+  Widget buildView() => HtmlElementView(viewType: _viewId);
 
   void dispose() {
     _el?.pause();
@@ -64,7 +73,4 @@ class VideoController {
       _objectUrl = null;
     }
   }
-
-  /// Returns the HtmlElementView widget that renders the video.
-  Widget buildView() => HtmlElementView(viewType: viewId);
 }
