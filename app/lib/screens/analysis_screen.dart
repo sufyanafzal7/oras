@@ -499,6 +499,9 @@ class _AnalysisScreenState extends State<AnalysisScreen>
           const SizedBox(height: 8),
           ..._segments.asMap().entries
               .map((e) => _buildPhaseEventEntry(e.key, e.value)),
+          const SizedBox(height: 20),
+          _buildActionButtons(),
+          const SizedBox(height: 20),
         ],
       ),
     );
