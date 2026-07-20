@@ -7,7 +7,10 @@ lib/
 │   ├── home_shell.dart
 │   ├── ingestion_screen.dart
 │   ├── placeholder_screen.dart
-│   └── reports_screen.dart
+│   ├── reports_screen.dart
+│   ├── video_controller.dart
+│   ├── video_web_helper.dart
+│   └── video_web_helper_stub.dart
 ├── services/
 │   ├── api_service.dart
 │   └── mock_data_service.dart

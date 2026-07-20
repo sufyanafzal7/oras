@@ -4,7 +4,8 @@ import '../widgets/common/oras_app_bar.dart';
 import '../widgets/common/oras_bottom_nav.dart';
 import 'dashboard_screen.dart';
 import 'placeholder_screen.dart';
-import 'analysis_screen.dart';
+import 'ingestion_screen.dart';   // was analysis_screen.dart
+import 'analysis_tab_screen.dart'; // new Analysis tab
 
 /// Holds the persistent app bar + bottom nav, switching between
 /// the four main tabs via IndexedStack so each tab keeps its
@@ -19,11 +20,11 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _currentIndex = 0;
 
-  final List<Widget> _screens = const [
-    DashboardScreen(),
-    const AnalysisScreen(),
-    PlaceholderScreen(title: 'AI Insight Engine', icon: Icons.insights_rounded),
-    PlaceholderScreen(title: 'Reports', icon: Icons.description_rounded),
+  List<Widget> get _screens => [
+    const DashboardScreen(),
+    IngestionScreen(onSwitchTab: (i) => setState(() => _currentIndex = i)),
+    const AnalysisTabScreen(),
+    const PlaceholderScreen(title: 'Reports', icon: Icons.description_rounded),
   ];
 
   @override

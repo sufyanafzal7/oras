@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'theme/app_theme.dart';
 import 'screens/home_shell.dart';
-import 'screens/analysis_screen.dart';
+import 'screens/ingestion_screen.dart';
 import 'package:media_kit/media_kit.dart';
 
 void main() {
@@ -21,7 +21,7 @@ class OrasApp extends StatelessWidget {
       theme: AppTheme.dark,
       home: const HomeShell(),
       routes: {
-        '/analysis': (context) => const AnalysisScreen(),
+        '/analysis': (context) => const IngestionScreen(),
       },
     );
   }
