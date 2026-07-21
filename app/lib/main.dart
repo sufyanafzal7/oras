@@ -3,10 +3,12 @@ import 'theme/app_theme.dart';
 import 'screens/home_shell.dart';
 import 'screens/ingestion_screen.dart';
 import 'package:media_kit/media_kit.dart';
+import 'services/procedure_store.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  await ProcedureStore.instance.init();
   runApp(const OrasApp());
 }
 

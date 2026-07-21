@@ -58,7 +58,7 @@ desktop.ini
 
 
 ml/models/
-models/
+/models/
 
 # Flutter / Android build reports
 app/android/build/

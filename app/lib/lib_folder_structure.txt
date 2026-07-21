@@ -2,7 +2,7 @@ lib/
 ├── models/
 │   └── procedure.dart
 ├── screens/
-│   ├── analysis_screen.dart
+│   ├── analysis_tab_screen.dart
 │   ├── dashboard_screen.dart
 │   ├── home_shell.dart
 │   ├── ingestion_screen.dart
@@ -12,6 +12,7 @@ lib/
 │   ├── video_web_helper.dart
 │   └── video_web_helper_stub.dart
 ├── services/
+│   ├── analysis_state.dart
 │   ├── api_service.dart
 │   └── mock_data_service.dart
 ├── theme/
@@ -19,6 +20,16 @@ lib/
 │   ├── app_constants.dart
 │   └── app_theme.dart
 ├── widgets/
+│   ├── analysis/
+│   │   ├── cooccurrence_matrix.dart
+│   │   ├── efficiency_metrics.dart
+│   │   ├── gantt_timeline.dart
+│   │   ├── phase_detail_cards.dart
+│   │   ├── phase_donut_chart.dart
+│   │   ├── summary_strip.dart
+│   │   ├── tool_activity_grid.dart
+│   │   ├── tool_bar_chart.dart
+│   │   └── tool_detail_cards.dart
 │   ├── common/
 │   │   ├── oras_app_bar.dart
 │   │   └── oras_bottom_nav.dart

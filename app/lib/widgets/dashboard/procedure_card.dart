@@ -1,37 +1,23 @@
 import 'package:flutter/material.dart';
-import '../../models/procedure.dart';
+import '../../models/stored_procedure.dart';
 import '../../theme/app_colors.dart';
+import '../../theme/app_constants.dart';
 
 class ProcedureCard extends StatelessWidget {
-  final Procedure procedure;
-  final VoidCallback? onTap;
+  final StoredProcedure procedure;
+  final VoidCallback?   onTap;
 
-  const ProcedureCard({super.key, required this.procedure, this.onTap});
-
-  Color get _statusColor {
-    switch (procedure.status) {
-      case ProcedureStatus.completed:
-        return AppColors.statusCompleted;
-      case ProcedureStatus.analyzing:
-        return AppColors.statusAnalyzing;
-      case ProcedureStatus.failed:
-        return AppColors.statusAlert;
-    }
-  }
-
-  String get _statusLabel {
-    switch (procedure.status) {
-      case ProcedureStatus.completed:
-        return 'COMPLETED';
-      case ProcedureStatus.analyzing:
-        return 'ANALYZING';
-      case ProcedureStatus.failed:
-        return 'FAILED';
-    }
-  }
+  const ProcedureCard({
+    super.key,
+    required this.procedure,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final phaseColor = kPhaseColors[procedure.dominantPhase] ??
+        AppColors.accentCyan;
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -45,8 +31,7 @@ class ProcedureCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Placeholder visual — Phase 5 swaps this for a real
-            // frame grab once the ingestion pipeline exists.
+            // ── Thumbnail area ──────────────────────────────────────────────
             Stack(
               children: [
                 Container(
@@ -55,7 +40,7 @@ class ProcedureCard extends StatelessWidget {
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: [
-                        _statusColor.withValues(alpha: 0.25),
+                        phaseColor.withValues(alpha: 0.18),
                         AppColors.surfaceElevated,
                       ],
                       begin: Alignment.topLeft,
@@ -63,17 +48,43 @@ class ProcedureCard extends StatelessWidget {
                     ),
                   ),
                   alignment: Alignment.center,
-                  child: Icon(Icons.videocam_rounded,
-                      color: _statusColor.withValues(alpha: 0.6), size: 32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.videocam_rounded,
+                          color: phaseColor.withValues(alpha: 0.7),
+                          size: 28),
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 3),
+                        decoration: BoxDecoration(
+                          color:
+                          AppColors.background.withValues(alpha: 0.6),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          procedure.formattedDuration,
+                          style: const TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
+                // "ANALYZED" badge
                 Positioned(
                   top: 8,
                   left: 8,
                   child: Container(
-                    padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: AppColors.background.withValues(alpha: 0.7),
+                      color: AppColors.background.withValues(alpha: 0.75),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Row(
@@ -82,15 +93,16 @@ class ProcedureCard extends StatelessWidget {
                         Container(
                           width: 6,
                           height: 6,
-                          decoration: BoxDecoration(
-                              color: _statusColor, shape: BoxShape.circle),
+                          decoration: const BoxDecoration(
+                              color: AppColors.statusCompleted,
+                              shape: BoxShape.circle),
                         ),
-                        const SizedBox(width: 6),
-                        Text(
-                          _statusLabel,
+                        const SizedBox(width: 5),
+                        const Text(
+                          'ANALYZED',
                           style: TextStyle(
-                            color: _statusColor,
-                            fontSize: 10,
+                            color: AppColors.statusCompleted,
+                            fontSize: 9,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 0.5,
                           ),
@@ -99,28 +111,75 @@ class ProcedureCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                // Phase count chip — top right
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: phaseColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                      border:
+                      Border.all(color: phaseColor.withValues(alpha: 0.3)),
+                    ),
+                    child: Text(
+                      '${procedure.phaseCount} phases',
+                      style: TextStyle(
+                          color: phaseColor,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
               ],
             ),
+
+            // ── Info area ───────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.all(10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    procedure.title,
+                    procedure.fileName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                         color: AppColors.textPrimary,
                         fontWeight: FontWeight.w600,
-                        fontSize: 13),
+                        fontSize: 12),
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    procedure.surgeonName,
-                    style: const TextStyle(
-                        color: AppColors.textSecondary, fontSize: 11),
-                  ),
+                  Row(children: [
+                    const Icon(Icons.layers_rounded,
+                        size: 10, color: AppColors.textMuted),
+                    const SizedBox(width: 4),
+                    Text(
+                      procedure.dominantPhase,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: phaseColor, fontSize: 10),
+                    ),
+                  ]),
+                  const SizedBox(height: 2),
+                  Row(children: [
+                    const Icon(Icons.hardware_outlined,
+                        size: 10, color: AppColors.textMuted),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${procedure.toolCount} instruments',
+                      style: const TextStyle(
+                          color: AppColors.textMuted, fontSize: 10),
+                    ),
+                    const Spacer(),
+                    Text(
+                      procedure.formattedDate.split('  ').last,
+                      style: const TextStyle(
+                          color: AppColors.textMuted, fontSize: 9),
+                    ),
+                  ]),
                 ],
               ),
             ),

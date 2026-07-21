@@ -14,6 +14,8 @@ import 'video_controller.dart';
 import '../services/analysis_state.dart';
 import '../services/analysis_state.dart';
 import '../theme/app_colors.dart';
+import '../services/procedure_store.dart';
+import '../models/stored_procedure.dart';
 // Web-only imports — wrapped so native compiler never sees dart:html.
 // ignore: avoid_web_libraries_in_flutter
 import 'video_web_helper.dart'
@@ -345,6 +347,10 @@ class _AnalysisScreenState extends State<IngestionScreen>
 
   void _applyResult(Map<String, dynamic> raw) {
     AnalysisState.instance.setResult(raw);
+    // Persist this video to the Dashboard store
+    ProcedureStore.instance.add(
+      StoredProcedure.fromRaw(fileName: _selectedFile!.name, raw: raw),
+    );
     _totalDuration = (raw['duration'] as num?)?.toDouble() ?? 0.0;
 
     _segments = (raw['phase_timeline'] as List).map((p) {
