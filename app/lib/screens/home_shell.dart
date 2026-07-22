@@ -6,6 +6,7 @@ import 'dashboard_screen.dart';
 import 'placeholder_screen.dart';
 import 'ingestion_screen.dart';   // was analysis_screen.dart
 import 'analysis_tab_screen.dart'; // new Analysis tab
+import '../services/procedure_store.dart';
 
 /// Holds the persistent app bar + bottom nav, switching between
 /// the four main tabs via IndexedStack so each tab keeps its
@@ -21,7 +22,7 @@ class _HomeShellState extends State<HomeShell> {
   int _currentIndex = 0;
 
   List<Widget> get _screens => [
-    const DashboardScreen(),
+    DashboardScreen(onSwitchTab: (i) => setState(() => _currentIndex = i)),
     IngestionScreen(onSwitchTab: (i) => setState(() => _currentIndex = i)),
     const AnalysisTabScreen(),
     const PlaceholderScreen(title: 'Reports', icon: Icons.description_rounded),
