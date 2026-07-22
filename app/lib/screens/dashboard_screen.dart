@@ -6,6 +6,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_constants.dart';
 import '../widgets/dashboard/metric_card.dart';
 import '../widgets/dashboard/procedure_card.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class DashboardScreen extends StatefulWidget {
   final void Function(int)? onSwitchTab;
@@ -454,20 +455,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ── Procedures header row ─────────────────────────────────────────────────
   Widget _buildProceduresHeader(ProcedureStore store) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Analyzed Procedures',
-            style: TextStyle(
-                color: AppColors.textPrimary,
-                fontWeight: FontWeight.w600,
-                fontSize: 15)),
-        if (store.totalCount > 0)
-          TextButton(
-            onPressed: () => _confirmClear(context),
-            child: const Text('Clear All',
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Analyzed Procedures',
                 style: TextStyle(
-                    color: AppColors.textMuted, fontSize: 12)),
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15)),
+            if (store.totalCount > 0)
+              TextButton(
+                onPressed: () => _confirmClear(context),
+                child: const Text('Clear All',
+                    style: TextStyle(
+                        color: AppColors.textMuted, fontSize: 12)),
+              ),
+          ],
+        ),
+        if (kIsWeb)
+          const Text(
+            'Web platform stores video files for the last 10 analyses only.',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 10),
           ),
       ],
     );

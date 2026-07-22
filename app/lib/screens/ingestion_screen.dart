@@ -66,6 +66,7 @@ class _AnalysisScreenState extends State<IngestionScreen>
   bool          _isConnected      = false;
   double        _progress         = 0.0;
   String        _statusMsg        = 'Select a video to begin analysis';
+  String? _currentJobId;
   String        _etaString        = '';
   DateTime?     _analysisStartTime;
   StreamSubscription<Map<String, dynamic>>? _pollSub;
@@ -82,6 +83,7 @@ class _AnalysisScreenState extends State<IngestionScreen>
   final ValueNotifier<double> _playhead = ValueNotifier(0.0);
   bool _videoReady = false;
   bool _videoRestoreError = false;
+  bool _hasRestoredVideo = false; // true when video is being loaded from history
   bool _isPlaying  = false;
   int? _highlightedPhase;
   int? _highlightedTool;
@@ -93,6 +95,7 @@ class _AnalysisScreenState extends State<IngestionScreen>
   // On web: WebVideoHelper is the real impl; on native: it's a no-op stub.
   final WebVideoHelper _webVideo = WebVideoHelper();
   bool _webVideoReady = false;
+  //_hasRestoredVideo = false;
 
   // ── Resizable columns ─────────────────────────────────────────────────────
   static const double _minFrac = 0.14;
@@ -159,6 +162,7 @@ class _AnalysisScreenState extends State<IngestionScreen>
       _isAnalyzing      = false;
       _videoReady       = false;
       _webVideoReady    = false;
+      _hasRestoredVideo = true;
       _isPlaying        = false;
       _highlightedPhase = null;
       _highlightedTool  = null;
@@ -167,28 +171,82 @@ class _AnalysisScreenState extends State<IngestionScreen>
     _videoRestoreError = false;
 
     // Attempt to reload video on native platforms
-    if (!kIsWeb && stored.filePath != null) {
-      _reloadVideoFromPath(stored.filePath!, stored.fileName);
+    // Reload video on all platforms via backend URL
+    _reloadVideo(stored);
+  }
+
+  Future<void> _reloadVideo(StoredProcedure stored) async {
+    // On web: always use backend URL
+    // On native: prefer backend URL, fall back to local path
+    if (kIsWeb) {
+      if (stored.jobId == null) {
+        if (mounted) setState(() => _videoRestoreError = true);
+        return;
+      }
+      await _reloadFromUrl(ApiService.videoUrl(stored.jobId!));
+    } else {
+      // Try backend URL first (works if backend is running)
+      if (stored.jobId != null) {
+        final available = await ApiService.isVideoAvailable(stored.jobId!);
+        if (available) {
+          await _reloadFromUrl(ApiService.videoUrl(stored.jobId!));
+          return;
+        }
+      }
+      // Fall back to local path
+      if (stored.filePath != null) {
+        try {
+          final platformFile = PlatformFile(
+            name: stored.fileName,
+            size: 0,
+            path: stored.filePath,
+          );
+          await _video.loadFile(platformFile);
+          _positionTicker?.cancel();
+          _positionTicker = Timer.periodic(
+            const Duration(milliseconds: 250),
+                (_) {
+              if (!mounted) return;
+              final t = _video.currentTimeSeconds;
+              if ((t - _playhead.value).abs() > 0.1) {
+                _playhead.value = t;
+                _syncHighlights(t);
+                if (mounted) setState(() {});
+              }
+            },
+          );
+        } catch (_) {
+          if (mounted) setState(() => _videoRestoreError = true);
+        }
+      } else {
+        if (mounted) setState(() => _videoRestoreError = true);
+      }
     }
   }
 
-  Future<void> _reloadVideoFromPath(String path, String name) async {
+  Future<void> _reloadFromUrl(String url) async {
     try {
-      final platformFile = PlatformFile(name: name, size: 0, path: path);
-      await _video.loadFile(platformFile);
-      _positionTicker?.cancel();
-      _positionTicker = Timer.periodic(
-        const Duration(milliseconds: 250),
-            (_) {
-          if (!mounted) return;
-          final t = _video.currentTimeSeconds;
-          if ((t - _playhead.value).abs() > 0.1) {
-            _playhead.value = t;
-            _syncHighlights(t);
-            if (mounted) setState(() {});
-          }
-        },
-      );
+      if (kIsWeb) {
+        // _webVideo is already initialised in initState() — just load the URL.
+        // Setting src triggers onCanPlay which sets _webVideoReady = true.
+        _webVideo.loadUrl(url);
+      } else {
+        // media_kit supports HTTP URLs natively
+        await _video.loadUrl(url);
+        _positionTicker?.cancel();
+        _positionTicker = Timer.periodic(
+          const Duration(milliseconds: 250),
+              (_) {
+            if (!mounted) return;
+            final t = _video.currentTimeSeconds;
+            if ((t - _playhead.value).abs() > 0.1) {
+              _playhead.value = t;
+              _syncHighlights(t);
+              if (mounted) setState(() {});
+            }
+          },
+        );
+      }
     } catch (_) {
       if (mounted) setState(() => _videoRestoreError = true);
     }
@@ -388,6 +446,7 @@ class _AnalysisScreenState extends State<IngestionScreen>
 
     try {
       final jobId = await ApiService.submitVideo(_selectedFile!);
+      _currentJobId = jobId;
       setState(() => _statusMsg = 'Processing…');
       _pollSub = ApiService.pollUntilDone(jobId).listen(
         _handleUpdate,
@@ -451,6 +510,7 @@ class _AnalysisScreenState extends State<IngestionScreen>
       StoredProcedure.fromRaw(
         fileName: _selectedFile!.name,
         raw: raw,
+        jobId:    _currentJobId,   // store the job id for video URL building
         filePath: kIsWeb ? null : _selectedFile!.path,
       ),
     );
@@ -903,7 +963,7 @@ class _AnalysisScreenState extends State<IngestionScreen>
   // VIDEO PLAYER CARD
   // ─────────────────────────────────────────────────────────────────────────
   Widget _buildVideoPlayerCard() {
-    final bool hasVideo = _selectedFile != null || _videoReady;
+    final bool hasVideo = _selectedFile != null || _videoReady || _hasRestoredVideo;
     final bool ready = kIsWeb ? _webVideoReady : _videoReady;
 
     return Container(

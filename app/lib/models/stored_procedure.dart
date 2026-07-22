@@ -3,16 +3,17 @@ import 'dart:convert';
 /// One record per analyzed video, persisted in SharedPreferences.
 /// [rawResult] is the full JSON map returned by the Flask backend.
 class StoredProcedure {
-  final String              id;
-  final String              fileName;
-  final double              durationSeconds;
-  final DateTime            processedAt;
-  final int                 phaseCount;
-  final int                 toolCount;
-  final String              dominantPhase;
-  final String              dominantTool;
+  final String               id;
+  final String               fileName;
+  final double               durationSeconds;
+  final DateTime             processedAt;
+  final int                  phaseCount;
+  final int                  toolCount;
+  final String               dominantPhase;
+  final String               dominantTool;
   final Map<String, dynamic> rawResult;
-  final String? filePath; // null on web; absolute path on native
+  final String?              jobId;     // used to build /video/<jobId> URL
+  final String?              filePath;  // native fallback if backend unreachable
 
   const StoredProcedure({
     required this.id,
@@ -24,6 +25,7 @@ class StoredProcedure {
     required this.dominantPhase,
     required this.dominantTool,
     required this.rawResult,
+    this.jobId,
     this.filePath,
   });
 
@@ -39,7 +41,8 @@ class StoredProcedure {
     'dominantPhase':   dominantPhase,
     'dominantTool':    dominantTool,
     'rawResult':       rawResult,
-    'filePath': filePath,
+    'jobId':           jobId,
+    'filePath':        filePath,
   };
 
   factory StoredProcedure.fromJson(Map<String, dynamic> j) => StoredProcedure(
@@ -52,39 +55,48 @@ class StoredProcedure {
     dominantPhase:   j['dominantPhase']   as String,
     dominantTool:    j['dominantTool']    as String,
     rawResult:       Map<String, dynamic>.from(j['rawResult'] as Map),
-    filePath: j['filePath'] as String?,
+    jobId:           j['jobId']           as String?,
+    filePath:        j['filePath']        as String?,
   );
 
   // ── Factory from raw backend result ───────────────────────────────────────
 
   factory StoredProcedure.fromRaw({
-    required String              fileName,
+    required String               fileName,
     required Map<String, dynamic> raw,
-    String?                      filePath,
+    String?                       jobId,
+    String?                       filePath,
   }) {
-    final phases     = (raw['phase_timeline'] as List? ?? []);
-    final tools      = (raw['tools_detected'] as List? ?? []);
-    final duration   = (raw['duration']       as num?)?.toDouble() ?? 0.0;
+    final phases   = (raw['phase_timeline'] as List? ?? []);
+    final tools    = (raw['tools_detected'] as List? ?? []);
+    final duration = (raw['duration']       as num?)?.toDouble() ?? 0.0;
 
     // Dominant phase — most cumulative seconds
-    final phaseDur   = <String, double>{};
+    final phaseDur = <String, double>{};
     for (final p in phases) {
       final m     = p as Map<String, dynamic>;
-      final name  = m['phase']      as String;
+      final name  = m['phase']       as String;
       final start = (m['start_time'] as num).toDouble();
       final end   = (m['end_time']   as num).toDouble();
-      phaseDur[name] = (phaseDur[name] ?? 0) + (end - start).clamp(0.0, double.infinity);
+      phaseDur[name] =
+          (phaseDur[name] ?? 0) + (end - start).clamp(0.0, double.infinity);
     }
     final domPhase = phaseDur.isEmpty
         ? '—'
-        : phaseDur.entries.reduce((a, b) => a.value > b.value ? a : b).key;
+        : phaseDur.entries
+        .reduce((a, b) => a.value > b.value ? a : b)
+        .key;
 
     // Dominant tool — highest frame count
     final domTool = tools.isEmpty
         ? '—'
-        : (tools.map((t) => t as Map<String, dynamic>).reduce(
-          (a, b) => (a['frames_detected'] as int) >= (b['frames_detected'] as int) ? a : b,
-    )['tool'] as String);
+        : (tools
+        .map((t) => t as Map<String, dynamic>)
+        .reduce((a, b) =>
+    (a['frames_detected'] as int) >=
+        (b['frames_detected'] as int)
+        ? a
+        : b)['tool'] as String);
 
     return StoredProcedure(
       id:              DateTime.now().millisecondsSinceEpoch.toString(),
@@ -96,7 +108,8 @@ class StoredProcedure {
       dominantPhase:   domPhase,
       dominantTool:    domTool,
       rawResult:       raw,
-      filePath: filePath,
+      jobId:           jobId,
+      filePath:        filePath,
     );
   }
 
@@ -116,7 +129,6 @@ class StoredProcedure {
         '${d.minute.toString().padLeft(2, '0')}';
   }
 
-  /// Encodes the entire object to a JSON string for SharedPreferences storage.
   String encode() => jsonEncode(toJson());
 
   static StoredProcedure decode(String s) =>

@@ -16,6 +16,7 @@ class WebVideoHelper {
   }) {}
 
   void loadFile(PlatformFile file) {}
+  void loadUrl(String url) {}
   void play()  {}
   void pause() {}
   void seekTo(double seconds) {}

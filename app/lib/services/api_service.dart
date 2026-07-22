@@ -92,4 +92,18 @@ class ApiService {
           .toList(),
     );
   }
+  /// Returns the URL to stream the video for a given job.
+  /// Works on all platforms — native uses it too so code is unified.
+  static String videoUrl(String jobId) => '$_base/video/$jobId';
+
+  static Future<bool> isVideoAvailable(String jobId) async {
+    try {
+      final res = await http
+          .head(Uri.parse('$_base/video/$jobId'))
+          .timeout(const Duration(seconds: 3));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
 }

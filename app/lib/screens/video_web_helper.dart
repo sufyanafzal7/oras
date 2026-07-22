@@ -52,6 +52,12 @@ class WebVideoHelper {
     _el!.src = _objectUrl!;
   }
 
+  void loadUrl(String url) {
+    if (_el == null) return;
+    _revokeOldUrl();
+    _el!.src = url;
+  }
+
   void play()  => _el?.play();
   void pause() => _el?.pause();
 

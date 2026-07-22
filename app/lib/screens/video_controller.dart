@@ -45,6 +45,14 @@ class VideoController {
     _onCanPlay?.call();
   }
 
+  Future<void> loadUrl(String url) async {
+    if (_player == null) return;
+    _initialized = false;
+    await _player!.open(Media(url), play: false);
+    _initialized = true;
+    _onCanPlay?.call();
+  }
+
   double get currentTimeSeconds =>
       (_player?.state.position.inMilliseconds ?? 0) / 1000.0;
 
