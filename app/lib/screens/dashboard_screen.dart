@@ -34,9 +34,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ── Tap a procedure card ─────────────────────────────────────────────────
   void _openProcedure(StoredProcedure p) {
-    // Load analysis data back into the shared singleton
-    AnalysisState.instance.setResult(p.rawResult);
-    // Switch to Upload tab (index 1) so the scrubbers and video panel show
+    ProcedureStore.instance.selectProcedure(p);
     widget.onSwitchTab?.call(1);
   }
 

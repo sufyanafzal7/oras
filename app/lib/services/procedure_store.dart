@@ -17,6 +17,13 @@ class ProcedureStore extends ChangeNotifier {
   static const _kKey = 'oras_procedures_v1';
 
   List<StoredProcedure> _procedures = [];
+  StoredProcedure? _selectedProcedure;
+  StoredProcedure? get selectedProcedure => _selectedProcedure;
+
+  void selectProcedure(StoredProcedure? p) {
+    _selectedProcedure = p;
+    notifyListeners();
+  }
 
   /// All stored procedures, newest first.
   List<StoredProcedure> get procedures =>

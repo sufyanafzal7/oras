@@ -12,6 +12,7 @@ class StoredProcedure {
   final String              dominantPhase;
   final String              dominantTool;
   final Map<String, dynamic> rawResult;
+  final String? filePath; // null on web; absolute path on native
 
   const StoredProcedure({
     required this.id,
@@ -23,6 +24,7 @@ class StoredProcedure {
     required this.dominantPhase,
     required this.dominantTool,
     required this.rawResult,
+    this.filePath,
   });
 
   // ── Serialisation ─────────────────────────────────────────────────────────
@@ -37,6 +39,7 @@ class StoredProcedure {
     'dominantPhase':   dominantPhase,
     'dominantTool':    dominantTool,
     'rawResult':       rawResult,
+    'filePath': filePath,
   };
 
   factory StoredProcedure.fromJson(Map<String, dynamic> j) => StoredProcedure(
@@ -49,6 +52,7 @@ class StoredProcedure {
     dominantPhase:   j['dominantPhase']   as String,
     dominantTool:    j['dominantTool']    as String,
     rawResult:       Map<String, dynamic>.from(j['rawResult'] as Map),
+    filePath: j['filePath'] as String?,
   );
 
   // ── Factory from raw backend result ───────────────────────────────────────
@@ -56,6 +60,7 @@ class StoredProcedure {
   factory StoredProcedure.fromRaw({
     required String              fileName,
     required Map<String, dynamic> raw,
+    String?                      filePath,
   }) {
     final phases     = (raw['phase_timeline'] as List? ?? []);
     final tools      = (raw['tools_detected'] as List? ?? []);
@@ -91,6 +96,7 @@ class StoredProcedure {
       dominantPhase:   domPhase,
       dominantTool:    domTool,
       rawResult:       raw,
+      filePath: filePath,
     );
   }
 

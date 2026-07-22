@@ -12,8 +12,6 @@ import '../widgets/confidence_gauge_widget.dart';
 import '../widgets/tool_badge_widget.dart';
 import 'video_controller.dart';
 import '../services/analysis_state.dart';
-import '../services/analysis_state.dart';
-import '../theme/app_colors.dart';
 import '../services/procedure_store.dart';
 import '../models/stored_procedure.dart';
 // Web-only imports — wrapped so native compiler never sees dart:html.
@@ -83,6 +81,7 @@ class _AnalysisScreenState extends State<IngestionScreen>
   // ── Playhead ───────────────────────────────────────────────────────────────
   final ValueNotifier<double> _playhead = ValueNotifier(0.0);
   bool _videoReady = false;
+  bool _videoRestoreError = false;
   bool _isPlaying  = false;
   int? _highlightedPhase;
   int? _highlightedTool;
@@ -107,6 +106,93 @@ class _AnalysisScreenState extends State<IngestionScreen>
 
   // Ticker for polling native video position
   Timer? _positionTicker;
+
+  // ─────────────────────────────────────────────────────────────────────────
+// Dashboard restore
+// ─────────────────────────────────────────────────────────────────────────
+  void _onStoreSelection() {
+    final p = ProcedureStore.instance.selectedProcedure;
+    if (p != null && mounted) {
+      _restoreFromStored(p);
+      // Clear the selection so re-entering the tab doesn't re-trigger it
+      ProcedureStore.instance.selectProcedure(null);
+    }
+  }
+
+  void _restoreFromStored(StoredProcedure stored) {
+    final raw = stored.rawResult;
+
+    // Push into AnalysisState so the Analysis tab also has it
+    AnalysisState.instance.setResult(raw);
+
+    // Rebuild Upload tab display state from stored data
+    final segments = (raw['phase_timeline'] as List? ?? []).map((p) {
+      final m = p as Map<String, dynamic>;
+      return _PhaseSegment(
+        phase:     m['phase']      as String,
+        startTime: (m['start_time'] as num).toDouble(),
+        endTime:   (m['end_time']   as num).toDouble(),
+      );
+    }).toList();
+
+    final toolsRaw = (raw['tools_detected'] as List? ?? [])
+        .map((t) => (t as Map<String, dynamic>)['tool'] as String)
+        .toSet()
+        .toList();
+
+    final toolOccurrences = _deriveToolOccurrences(segments, toolsRaw);
+
+    final domPhase = segments.isNotEmpty ? segments.last.phase : '—';
+    final duration = (raw['duration'] as num?)?.toDouble() ?? 0.0;
+
+    setState(() {
+      // File info — show stored filename, no actual file loaded
+      _selectedFile     = null;
+      _statusMsg        = 'Loaded from history: ${stored.fileName}';
+      _totalDuration    = duration;
+      _segments         = segments;
+      _toolOccurrences  = toolOccurrences;
+      _activeTools      = toolsRaw;
+      _currentPhase     = domPhase;
+      _phaseConf        = 1.0;
+      _progress         = 1.0;
+      _isAnalyzing      = false;
+      _videoReady       = false;
+      _webVideoReady    = false;
+      _isPlaying        = false;
+      _highlightedPhase = null;
+      _highlightedTool  = null;
+    });
+    _playhead.value = 0.0;
+    _videoRestoreError = false;
+
+    // Attempt to reload video on native platforms
+    if (!kIsWeb && stored.filePath != null) {
+      _reloadVideoFromPath(stored.filePath!, stored.fileName);
+    }
+  }
+
+  Future<void> _reloadVideoFromPath(String path, String name) async {
+    try {
+      final platformFile = PlatformFile(name: name, size: 0, path: path);
+      await _video.loadFile(platformFile);
+      _positionTicker?.cancel();
+      _positionTicker = Timer.periodic(
+        const Duration(milliseconds: 250),
+            (_) {
+          if (!mounted) return;
+          final t = _video.currentTimeSeconds;
+          if ((t - _playhead.value).abs() > 0.1) {
+            _playhead.value = t;
+            _syncHighlights(t);
+            if (mounted) setState(() {});
+          }
+        },
+      );
+    } catch (_) {
+      if (mounted) setState(() => _videoRestoreError = true);
+    }
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // Lifecycle
@@ -141,6 +227,18 @@ class _AnalysisScreenState extends State<IngestionScreen>
       );
     }
 
+
+
+    // Listen for dashboard card taps
+    ProcedureStore.instance.addListener(_onStoreSelection);
+    // Restore immediately if a procedure was already selected before this
+    // screen was mounted (e.g. IndexedStack pre-builds it)
+    if (ProcedureStore.instance.selectedProcedure != null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _restoreFromStored(ProcedureStore.instance.selectedProcedure!),
+      );
+    }
+
     _checkConnection();
   }
 
@@ -152,6 +250,7 @@ class _AnalysisScreenState extends State<IngestionScreen>
     _positionTicker?.cancel();
     _video.dispose();
     _webVideo.dispose();
+    ProcedureStore.instance.removeListener(_onStoreSelection);
     super.dispose();
   }
 
@@ -349,7 +448,11 @@ class _AnalysisScreenState extends State<IngestionScreen>
     AnalysisState.instance.setResult(raw);
     // Persist this video to the Dashboard store
     ProcedureStore.instance.add(
-      StoredProcedure.fromRaw(fileName: _selectedFile!.name, raw: raw),
+      StoredProcedure.fromRaw(
+        fileName: _selectedFile!.name,
+        raw: raw,
+        filePath: kIsWeb ? null : _selectedFile!.path,
+      ),
     );
     _totalDuration = (raw['duration'] as num?)?.toDouble() ?? 0.0;
 
@@ -800,8 +903,7 @@ class _AnalysisScreenState extends State<IngestionScreen>
   // VIDEO PLAYER CARD
   // ─────────────────────────────────────────────────────────────────────────
   Widget _buildVideoPlayerCard() {
-    final bool hasVideo = _selectedFile != null;
-    // Determine readiness per platform
+    final bool hasVideo = _selectedFile != null || _videoReady;
     final bool ready = kIsWeb ? _webVideoReady : _videoReady;
 
     return Container(
@@ -815,12 +917,14 @@ class _AnalysisScreenState extends State<IngestionScreen>
       child: Stack(
         children: [
           // ── Video content
-          if (!hasVideo)
+          if (_videoRestoreError)
+            _buildVideoPlaceholder(false)
+          else if (!hasVideo)
             _buildVideoPlaceholder(false)
           else if (!ready)
-            const Center(
-                child: CircularProgressIndicator(
-                    color: AppColors.accentCyan))
+              const Center(
+                  child: CircularProgressIndicator(
+                      color: AppColors.accentCyan))
           else if (kIsWeb)
               _webVideo.buildView()
             else
@@ -844,18 +948,30 @@ class _AnalysisScreenState extends State<IngestionScreen>
   }
 
   Widget _buildVideoPlaceholder(bool loading) {
+    final msg = _videoRestoreError
+        ? 'Exception Happened\nVideo file could not be loaded.\nIt may have been moved, renamed, or deleted.'
+        : loading
+        ? 'Loading video…'
+        : 'Select a video file to begin';
+
+    final icon = _videoRestoreError
+        ? Icons.error_outline_rounded
+        : Icons.videocam_off_outlined;
+
+    final color = _videoRestoreError
+        ? AppColors.accentMagenta
+        : AppColors.textMuted;
+
     return Container(
       alignment: Alignment.center,
       color: AppColors.surface,
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.videocam_off_outlined,
-            color: AppColors.textMuted, size: 30),
+        Icon(icon, color: color, size: 30),
         const SizedBox(height: 8),
         Text(
-          loading ? 'Loading video…' : 'Select a video file to begin',
+          msg,
           textAlign: TextAlign.center,
-          style: const TextStyle(
-              color: AppColors.textMuted, fontSize: 11, height: 1.5),
+          style: TextStyle(color: color, fontSize: 11, height: 1.5),
         ),
       ]),
     );
