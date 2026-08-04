@@ -1,4 +1,5 @@
-# ORAS - AI Powered Surgical Intelligence Platform
+# ORAS - Operative Recognition & Analysis System
+### AI Powered Surgical Intelligence Platform
 
 ## Overview
 
