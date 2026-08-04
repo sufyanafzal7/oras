@@ -42,8 +42,8 @@ ORAS is designed specifically for the retrospective analysis of laparoscopic cho
 
 ## Authors
 
-- **Sufyan Afzal**
-- **Sabeen Saeed**
+- **[Sufyan Afzal](https://www.linkedin.com/in/sufyanafzal7)**
+- **[Sabeen Saeed](https://www.linkedin.com/in/sabeensaeed06)**
 
 **Supervisor:** Mr. Qasim Malik
 
