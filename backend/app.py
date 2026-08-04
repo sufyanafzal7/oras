@@ -10,6 +10,7 @@ from flask_cors import CORS
 from inference import analyze_video
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 9 * 1024 * 1024 * 1024  # 9 GB
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 UPLOAD_DIR = Path(__file__).parent / "uploads"
@@ -65,14 +66,12 @@ def _run_job(job_id: str, video_path: str):
                 "status":     "done",
                 "progress":   1.0,
                 "result":     result,
-                "video_path": video_path,   # keep path — file stays on disk
+                "video_path": video_path,
             })
 
-        # Register this job in the web video queue AFTER analysis succeeds
         with _queue_lock:
             _web_video_queue.append(job_id)
 
-        # Enforce 10-video limit (deletes oldest file if needed)
         _enforce_video_limit()
 
     except Exception as e:
@@ -81,7 +80,6 @@ def _run_job(job_id: str, video_path: str):
                 "status": "error",
                 "error":  str(e),
             })
-        # On error, clean up the file immediately
         Path(video_path).unlink(missing_ok=True)
 
 
@@ -127,12 +125,11 @@ def status(job_id: str):
         job = _jobs.get(job_id)
     if job is None:
         return jsonify({"error": "Job not found"}), 404
-    # Expose whether the video file is still available
     return jsonify({
-        "status":        job["status"],
-        "progress":      job.get("progress", 0.0),
-        "result":        job.get("result"),
-        "video_path":    job.get("video_path"),          # None = file deleted
+        "status":          job["status"],
+        "progress":        job.get("progress", 0.0),
+        "result":          job.get("result"),
+        "video_path":      job.get("video_path"),
         "video_available": job.get("video_path") is not None,
     })
 
@@ -141,8 +138,7 @@ def status(job_id: str):
 def serve_video(job_id: str):
     """
     Streams the stored video file back to the client.
-    Returns 404 if the job doesn't exist or the file was deleted
-    (either by the 10-video limit or manually).
+    Returns 404 if the job doesn't exist or the file was deleted.
     """
     with _jobs_lock:
         job = _jobs.get(job_id)
@@ -157,9 +153,19 @@ def serve_video(job_id: str):
     return send_file(
         video_path,
         mimetype="video/mp4",
-        conditional=True,   # supports range requests (seek works in browser)
+        conditional=True,
     )
 
 
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    from waitress import serve
+    print("[ORAS] Starting backend on http://0.0.0.0:5000 ...")
+    serve(
+        app,
+        host="0.0.0.0",
+        port=5000,
+        threads=4,
+        max_request_body_size=9 * 1024 * 1024 * 1024,  # match Flask's 9 GB cap
+        channel_timeout=1800,  # 30 min — enough headroom for slow large uploads
+    )

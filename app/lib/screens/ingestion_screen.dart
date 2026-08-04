@@ -51,7 +51,8 @@ class _ToolOccurrence {
 // ─────────────────────────────────────────────────────────────────────────────
 class IngestionScreen extends StatefulWidget {
   final void Function(int)? onSwitchTab;
-  const IngestionScreen({super.key, this.onSwitchTab});
+  final void Function(String procedureId)? onHighlightReport;
+  const IngestionScreen({super.key, this.onSwitchTab, this.onHighlightReport});
 
   @override
   State<IngestionScreen> createState() => _AnalysisScreenState();
@@ -67,6 +68,7 @@ class _AnalysisScreenState extends State<IngestionScreen>
   double        _progress         = 0.0;
   String        _statusMsg        = 'Select a video to begin analysis';
   String? _currentJobId;
+  String? _loadedProcedureId;   // id of the procedure currently shown (from history or fresh analysis)
   String        _etaString        = '';
   DateTime?     _analysisStartTime;
   StreamSubscription<Map<String, dynamic>>? _pollSub;
@@ -163,6 +165,7 @@ class _AnalysisScreenState extends State<IngestionScreen>
       _videoReady       = false;
       _webVideoReady    = false;
       _hasRestoredVideo = true;
+      _loadedProcedureId = stored.id;
       _isPlaying        = false;
       _highlightedPhase = null;
       _highlightedTool  = null;
@@ -506,14 +509,15 @@ class _AnalysisScreenState extends State<IngestionScreen>
   void _applyResult(Map<String, dynamic> raw) {
     AnalysisState.instance.setResult(raw);
     // Persist this video to the Dashboard store
-    ProcedureStore.instance.add(
-      StoredProcedure.fromRaw(
-        fileName: _selectedFile!.name,
-        raw: raw,
-        jobId:    _currentJobId,   // store the job id for video URL building
-        filePath: kIsWeb ? null : _selectedFile!.path,
-      ),
+    final record = StoredProcedure.fromRaw(
+      fileName: _selectedFile!.name,
+      raw: raw,
+      jobId:    _currentJobId,
+      filePath: kIsWeb ? null : _selectedFile!.path,
     );
+    ProcedureStore.instance.add(record);
+    setState(() => _loadedProcedureId = record.id);
+
     _totalDuration = (raw['duration'] as num?)?.toDouble() ?? 0.0;
 
     _segments = (raw['phase_timeline'] as List).map((p) {
@@ -1471,12 +1475,23 @@ class _AnalysisScreenState extends State<IngestionScreen>
         const SizedBox(width: 12),
         Expanded(
           child: ElevatedButton.icon(
-            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Report download — will be implemented in a future build.'),
-                backgroundColor: AppColors.surface,
-              ),
-            ),
+            onPressed: () {
+              final id = _loadedProcedureId ??
+                  (ProcedureStore.instance.procedures.isNotEmpty
+                      ? ProcedureStore.instance.procedures.first.id
+                      : null);
+
+              if (id == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('No analysis available. Analyze a video first.'),
+                    backgroundColor: AppColors.accentAmber,
+                  ),
+                );
+                return;
+              }
+              widget.onHighlightReport?.call(id);
+            },
             icon: const Icon(Icons.download_rounded, size: 16),
             label: const Text('Download'),
             style: ElevatedButton.styleFrom(

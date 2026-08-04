@@ -5,7 +5,7 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   media_kit_libs_linux
   media_kit_video
-  volume_controller
+  printing
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:oras/screens/reports_screen.dart';
 import '../theme/app_colors.dart';
 import '../widgets/common/oras_app_bar.dart';
 import '../widgets/common/oras_bottom_nav.dart';
@@ -20,12 +21,25 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _currentIndex = 0;
+  String? _highlightedReportId;
 
   List<Widget> get _screens => [
     DashboardScreen(onSwitchTab: (i) => setState(() => _currentIndex = i)),
-    IngestionScreen(onSwitchTab: (i) => setState(() => _currentIndex = i)),
+    IngestionScreen(
+      onSwitchTab: (i) => setState(() => _currentIndex = i),
+  onHighlightReport: (id) {
+    setState(() {
+    _highlightedReportId = null;   // reset first so didUpdateWidget fires
+    _currentIndex = 3;
+    });
+    // one frame later, set the real id — guaranteed transition null → id
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (mounted) setState(() => _highlightedReportId = id);
+    });
+    },),
+
     const AnalysisTabScreen(),
-    const PlaceholderScreen(title: 'Reports', icon: Icons.description_rounded),
+    ReportsScreen(highlightedProcedureId: _highlightedReportId),
   ];
 
   @override

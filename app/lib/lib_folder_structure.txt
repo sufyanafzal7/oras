@@ -1,6 +1,7 @@
 lib/
 ├── models/
-│   └── procedure.dart
+│   ├── procedure.dart
+│   └── stored_procedure.dart
 ├── screens/
 │   ├── analysis_tab_screen.dart
 │   ├── dashboard_screen.dart
@@ -14,7 +15,8 @@ lib/
 ├── services/
 │   ├── analysis_state.dart
 │   ├── api_service.dart
-│   └── mock_data_service.dart
+│   ├── mock_data_service.dart
+│   └── procedure_store.dart
 ├── theme/
 │   ├── app_colors.dart
 │   ├── app_constants.dart

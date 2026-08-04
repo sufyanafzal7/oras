@@ -31,12 +31,22 @@ class ApiService {
   static Future<String> submitVideo(PlatformFile file) async {
     final req = http.MultipartRequest('POST', Uri.parse('$_base/analyze'));
 
+    // AFTER:
     if (kIsWeb) {
+      // Use fromBytes only if file is under 500 MB to avoid browser memory crash.
+      // For larger files on web, we cannot stream — this is a browser limitation.
+      // Show a clear error message instead of a silent crash.
+      if (file.bytes == null || file.size > 500 * 1024 * 1024) {
+        throw Exception(
+          'Web uploads are limited to 500 MB. '
+              'For larger videos, use the Desktop app.',
+        );
+      }
       req.files.add(http.MultipartFile.fromBytes(
         'video',
         file.bytes!,
         filename: file.name,
-        contentType: MediaType('video', 'mp4'),  // explicit MIME type
+        contentType: MediaType('video', 'mp4'),
       ));
     } else {
       req.files.add(await http.MultipartFile.fromPath(

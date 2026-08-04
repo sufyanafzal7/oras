@@ -3,3 +3,4 @@ flask-cors==4.0.1
 onnxruntime==1.18.1
 numpy==1.26.4
 opencv-python-headless==4.10.0.84
+waitress==3.0.0

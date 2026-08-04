@@ -16,6 +16,8 @@ dependencies:
   media_kit: ^1.1.11
   media_kit_video: ^1.2.4
   media_kit_libs_video: ^1.0.4
+  pdf: ^3.11.1
+  printing: ^5.13.1
 
 dev_dependencies:
   flutter_test:
@@ -25,3 +27,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+dependency_overrides:
+  media_kit_libs_android_video:
+    path: patched_packages/media_kit_libs_android_video
+  printing:
+    path: patched_packages/printing
+  media_kit_video:
+    path: patched_packages/media_kit_video
