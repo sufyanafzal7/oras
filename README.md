@@ -45,7 +45,7 @@ ORAS is designed specifically for the retrospective analysis of laparoscopic cho
 - **[Sufyan Afzal](https://www.linkedin.com/in/sufyanafzal7)**
 - **[Sabeen Saeed](https://www.linkedin.com/in/sabeensaeed06)**
 
-**Supervisor:** Mr. Qasim Malik
+**Supervisor:** [Mr. Qasim Malik](https://www.linkedin.com/in/qasim-malik-7030205)
 
 COMSATS University Islamabad  
 Bachelor of Science in Artificial Intelligence (BSAI)
