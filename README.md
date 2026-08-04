@@ -48,7 +48,7 @@ ORAS is designed specifically for the retrospective analysis of laparoscopic cho
 **Supervisor:** Mr. Qasim Malik
 
 COMSATS University Islamabad  
-Bachelor of Science in Computer Science (2023–2027)
+Bachelor of Science in Artificial Intelligence (BSAI)
 
 ## License
 
