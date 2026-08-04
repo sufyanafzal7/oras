@@ -68,3 +68,5 @@ ml/outputs/
 
 # Large documentation artifacts (if regenerated)
 folder_structure.txt
+
+releases/
