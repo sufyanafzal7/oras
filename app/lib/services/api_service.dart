@@ -6,12 +6,26 @@ import '../models/procedure.dart';
 import 'package:http_parser/http_parser.dart';
 
 class ApiService {
+  static String get baseUrl => _base;
+
   static String get _base {
     if (kIsWeb) return 'http://127.0.0.1:5000';
     if (defaultTargetPlatform == TargetPlatform.android) {
       return 'http://192.168.137.1:5000';   // PC hotspot IP
     }
     return 'http://127.0.0.1:5000';
+  }
+
+  static String get _platform {
+    if (kIsWeb) return 'web';
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android: return 'android';
+      case TargetPlatform.iOS:     return 'ios';
+      case TargetPlatform.windows: return 'windows';
+      case TargetPlatform.macOS:   return 'macos';
+      case TargetPlatform.linux:   return 'linux';
+      default:                     return 'unknown';
+    }
   }
 
   // ── Health check ──────────────────────────────────────────────────────────
@@ -30,6 +44,7 @@ class ApiService {
   // Takes a PlatformFile directly so we can use bytes on web, path on native.
   static Future<String> submitVideo(PlatformFile file) async {
     final req = http.MultipartRequest('POST', Uri.parse('$_base/analyze'));
+    req.fields['platform'] = _platform;
 
     // AFTER:
     if (kIsWeb) {
@@ -115,5 +130,29 @@ class ApiService {
     } catch (_) {
       return false;
     }
+
+  }
+  // ── Editing-timeline protection ──────────────────────────────────────────
+  // Called by EditTimelineStore whenever a video gains/loses its first/last
+  // saved editing timeline, so the web-only rolling upload limit never
+  // deletes a source file a timeline still depends on.
+
+  static Future<void> protectJob(String jobId) async {
+    try {
+      await http
+          .post(Uri.parse('$_base/jobs/$jobId/protect'))
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {
+      // Best-effort — if this fails the web cap may evict the video early,
+      // but it never blocks the local editing flow.
+    }
+  }
+
+  static Future<void> unprotectJob(String jobId) async {
+    try {
+      await http
+          .post(Uri.parse('$_base/jobs/$jobId/unprotect'))
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {}
   }
 }

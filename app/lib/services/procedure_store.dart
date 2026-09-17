@@ -17,11 +17,31 @@ class ProcedureStore extends ChangeNotifier {
   static const _kKey = 'oras_procedures_v1';
 
   List<StoredProcedure> _procedures = [];
+
+  // Transient, one-shot: set by Dashboard on card tap, consumed and
+  // immediately cleared by IngestionScreen to trigger its restore-from-
+  // history flow. Not a durable "current video" signal — see
+  // activeProcedure below for that.
   StoredProcedure? _selectedProcedure;
   StoredProcedure? get selectedProcedure => _selectedProcedure;
 
   void selectProcedure(StoredProcedure? p) {
+    if (identical(_selectedProcedure, p)) return;
     _selectedProcedure = p;
+    notifyListeners();
+  }
+
+  // Durable: whichever video is currently loaded in the Upload tab —
+  // via a fresh analysis completing, or a history restore. Unlike
+  // selectedProcedure, this is NOT cleared after one read. This is
+  // what the Video Editing tab (and anything else that needs "the
+  // video the user is currently working with") should read.
+  StoredProcedure? _activeProcedure;
+  StoredProcedure? get activeProcedure => _activeProcedure;
+
+  void setActiveProcedure(StoredProcedure? p) {
+    if (identical(_activeProcedure, p)) return;
+    _activeProcedure = p;
     notifyListeners();
   }
 

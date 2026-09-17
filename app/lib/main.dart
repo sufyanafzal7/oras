@@ -4,11 +4,13 @@ import 'screens/home_shell.dart';
 import 'screens/ingestion_screen.dart';
 import 'package:media_kit/media_kit.dart';
 import 'services/procedure_store.dart';
+import 'services/edit_timeline_store.dart';   // ADD THIS LINE
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   await ProcedureStore.instance.init();
+  await EditTimelineStore.instance.init();     // ADD THIS LINE
   runApp(const OrasApp());
 }
 

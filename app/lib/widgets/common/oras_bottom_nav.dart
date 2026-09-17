@@ -15,6 +15,7 @@ class OrasBottomNav extends StatelessWidget {
     (icon: Icons.grid_view_rounded, label: 'Dashboard'),
     (icon: Icons.cloud_upload_rounded, label: 'Upload'),
     (icon: Icons.insights_rounded, label: 'Analysis'),
+    (icon: Icons.content_cut_rounded, label: 'Editor'),
     (icon: Icons.description_rounded, label: 'Reports'),
   ];
 

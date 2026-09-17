@@ -16,7 +16,12 @@ lib/
 │   ├── analysis_state.dart
 │   ├── api_service.dart
 │   ├── mock_data_service.dart
-│   └── procedure_store.dart
+│   ├── pdf_saver.dart
+│   ├── pdf_saver_io.dart
+│   ├── pdf_saver_stub.dart
+│   ├── pdf_saver_web.dart
+│   ├── procedure_store.dart
+│   └── report_generator.dart
 ├── theme/
 │   ├── app_colors.dart
 │   ├── app_constants.dart
@@ -40,6 +45,8 @@ lib/
 │   │   ├── mini_bar_chart.dart
 │   │   ├── phase_timeline_widget.dart
 │   │   └── procedure_card.dart
+│   ├── reports/
+│   │   └── report_card.dart
 │   ├── confidence_gauge_widget.dart
 │   ├── phase_timeline_widget.dart
 │   └── tool_badge_widget.dart

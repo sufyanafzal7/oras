@@ -56,6 +56,9 @@ class VideoController {
   double get currentTimeSeconds =>
       (_player?.state.position.inMilliseconds ?? 0) / 1000.0;
 
+  double get durationSeconds =>
+      (_player?.state.duration.inMilliseconds ?? 0) / 1000.0;
+
   double get aspectRatio {
     final w = _player?.state.width;
     final h = _player?.state.height;

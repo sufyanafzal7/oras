@@ -118,9 +118,13 @@ class _AnalysisScreenState extends State<IngestionScreen>
   void _onStoreSelection() {
     final p = ProcedureStore.instance.selectedProcedure;
     if (p != null && mounted) {
-      _restoreFromStored(p);
-      // Clear the selection so re-entering the tab doesn't re-trigger it
+      // Clear the transient trigger FIRST. setActiveProcedure() inside
+      // _restoreFromStored() also calls notifyListeners(), which
+      // re-enters this very listener synchronously (it's registered on
+      // the same ProcedureStore) — clearing first makes that re-entrant
+      // call a no-op instead of an infinite recursive loop.
       ProcedureStore.instance.selectProcedure(null);
+      _restoreFromStored(p);
     }
   }
 
@@ -170,6 +174,7 @@ class _AnalysisScreenState extends State<IngestionScreen>
       _highlightedPhase = null;
       _highlightedTool  = null;
     });
+    ProcedureStore.instance.setActiveProcedure(stored);
     _playhead.value = 0.0;
     _videoRestoreError = false;
 
@@ -516,6 +521,7 @@ class _AnalysisScreenState extends State<IngestionScreen>
       filePath: kIsWeb ? null : _selectedFile!.path,
     );
     ProcedureStore.instance.add(record);
+    ProcedureStore.instance.setActiveProcedure(record);
     setState(() => _loadedProcedureId = record.id);
 
     _totalDuration = (raw['duration'] as num?)?.toDouble() ?? 0.0;

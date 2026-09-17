@@ -8,6 +8,7 @@ import 'placeholder_screen.dart';
 import 'ingestion_screen.dart';   // was analysis_screen.dart
 import 'analysis_tab_screen.dart'; // new Analysis tab
 import '../services/procedure_store.dart';
+import 'video_editing_tab_screen.dart';
 
 /// Holds the persistent app bar + bottom nav, switching between
 /// the four main tabs via IndexedStack so each tab keeps its
@@ -30,7 +31,7 @@ class _HomeShellState extends State<HomeShell> {
   onHighlightReport: (id) {
     setState(() {
     _highlightedReportId = null;   // reset first so didUpdateWidget fires
-    _currentIndex = 3;
+    _currentIndex = 4;
     });
     // one frame later, set the real id — guaranteed transition null → id
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -39,6 +40,7 @@ class _HomeShellState extends State<HomeShell> {
     },),
 
     const AnalysisTabScreen(),
+    VideoEditingTabScreen(onSwitchTab: (i) => setState(() => _currentIndex = i)),
     ReportsScreen(highlightedProcedureId: _highlightedReportId),
   ];
 

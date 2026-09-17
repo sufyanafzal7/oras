@@ -8,6 +8,7 @@ import 'package:flutter/widgets.dart';
 
 class WebVideoHelper {
   double get currentTime => 0.0;
+  double get duration => 0.0;
 
   void init({
     required VoidCallback onTimeUpdate,

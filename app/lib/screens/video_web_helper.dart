@@ -44,6 +44,11 @@ class WebVideoHelper {
 
   double get currentTime => _el?.currentTime.toDouble() ?? 0.0;
 
+  double get duration {
+    final d = (_el?.duration ?? 0.0).toDouble();
+    return d.isFinite ? d : 0.0;
+  }
+
   void loadFile(PlatformFile file) {
     if (_el == null || file.bytes == null) return;
     _revokeOldUrl();

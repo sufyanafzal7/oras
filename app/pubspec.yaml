@@ -16,6 +16,7 @@ dependencies:
   media_kit: ^1.1.11
   media_kit_video: ^1.2.4
   media_kit_libs_video: ^1.0.4
+  media_kit_native_event_loop: ^1.0.9
   pdf: ^3.11.1
   printing: ^5.13.1
 
