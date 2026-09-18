@@ -57,7 +57,7 @@ desktop.ini
 **/GoogleService-Info.plist
 
 
-ml/models/
+#ml/models/
 /models/
 
 # Flutter / Android build reports
