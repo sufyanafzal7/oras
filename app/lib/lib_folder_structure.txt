@@ -1,7 +1,10 @@
 lib/
 ├── models/
+│   ├── edit_timeline.dart
 │   ├── procedure.dart
-│   └── stored_procedure.dart
+│   ├── stored_procedure.dart
+│   ├── timeline_clip.dart
+│   └── timeline_overlay.dart
 ├── screens/
 │   ├── analysis_tab_screen.dart
 │   ├── dashboard_screen.dart
@@ -10,18 +13,26 @@ lib/
 │   ├── placeholder_screen.dart
 │   ├── reports_screen.dart
 │   ├── video_controller.dart
+│   ├── video_editing_tab_screen.dart
+│   ├── video_editor_screen.dart
 │   ├── video_web_helper.dart
 │   └── video_web_helper_stub.dart
 ├── services/
 │   ├── analysis_state.dart
 │   ├── api_service.dart
+│   ├── edit_timeline_store.dart
+│   ├── editor_api_service.dart
 │   ├── mock_data_service.dart
 │   ├── pdf_saver.dart
 │   ├── pdf_saver_io.dart
 │   ├── pdf_saver_stub.dart
 │   ├── pdf_saver_web.dart
 │   ├── procedure_store.dart
-│   └── report_generator.dart
+│   ├── report_generator.dart
+│   ├── video_saver.dart
+│   ├── video_saver_io.dart
+│   ├── video_saver_stub.dart
+│   └── video_saver_web.dart
 ├── theme/
 │   ├── app_colors.dart
 │   ├── app_constants.dart
@@ -45,6 +56,13 @@ lib/
 │   │   ├── mini_bar_chart.dart
 │   │   ├── phase_timeline_widget.dart
 │   │   └── procedure_card.dart
+│   ├── editing/
+│   │   ├── clip_trim_sheet.dart
+│   │   ├── overlay_edit_sheet.dart
+│   │   ├── overlay_layer.dart
+│   │   ├── timeline_card.dart
+│   │   ├── timestamp_range_row.dart
+│   │   └── video_preview_player.dart
 │   ├── reports/
 │   │   └── report_card.dart
 │   ├── confidence_gauge_widget.dart

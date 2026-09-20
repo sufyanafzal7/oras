@@ -301,10 +301,8 @@ def edit_download(render_id: str):
 if __name__ == "__main__":
     from waitress import serve
     print("[ORAS] Starting backend on http://0.0.0.0:5000 ...")
-    serve(
-        app,
-        host="0.0.0.0",
-        port=5000,
+    port = int(os.environ.get("PORT", 5000))
+    serve(app, host="0.0.0.0", port=port,
         threads=4,
         max_request_body_size=9 * 1024 * 1024 * 1024,  # match Flask's 9 GB cap
         channel_timeout=1800,  # 30 min — enough headroom for slow large uploads
