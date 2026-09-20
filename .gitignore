@@ -63,7 +63,7 @@ desktop.ini
 # see the deployment note in the README/chat before deploying:
 # the backend needs models/phase/tcn_phase.onnx to exist wherever
 # it runs, and this rule means a fresh clone won't have it.
-/models/
+#/models/
 
 # Flutter / Android build reports
 app/android/build/
