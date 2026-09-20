@@ -1,5 +1,6 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:http/http.dart' as http;
 import 'package:file_picker/file_picker.dart';
 import '../models/procedure.dart';
@@ -9,9 +10,11 @@ class ApiService {
   static String get baseUrl => _base;
 
   static String get _base {
+    const fromEnv = String.fromEnvironment('API_BASE_URL');
+    if (fromEnv.isNotEmpty) return fromEnv;
     if (kIsWeb) return 'http://127.0.0.1:5000';
     if (defaultTargetPlatform == TargetPlatform.android) {
-      return 'http://192.168.137.1:5000';   // PC hotspot IP
+      return 'http://192.168.137.1:5000'; // PC hotspot IP
     }
     return 'http://127.0.0.1:5000';
   }
@@ -19,12 +22,18 @@ class ApiService {
   static String get _platform {
     if (kIsWeb) return 'web';
     switch (defaultTargetPlatform) {
-      case TargetPlatform.android: return 'android';
-      case TargetPlatform.iOS:     return 'ios';
-      case TargetPlatform.windows: return 'windows';
-      case TargetPlatform.macOS:   return 'macos';
-      case TargetPlatform.linux:   return 'linux';
-      default:                     return 'unknown';
+      case TargetPlatform.android:
+        return 'android';
+      case TargetPlatform.iOS:
+        return 'ios';
+      case TargetPlatform.windows:
+        return 'windows';
+      case TargetPlatform.macOS:
+        return 'macos';
+      case TargetPlatform.linux:
+        return 'linux';
+      default:
+        return 'unknown';
     }
   }
 
@@ -54,7 +63,7 @@ class ApiService {
       if (file.bytes == null || file.size > 500 * 1024 * 1024) {
         throw Exception(
           'Web uploads are limited to 500 MB. '
-              'For larger videos, use the Desktop app.',
+          'For larger videos, use the Desktop app.',
         );
       }
       req.files.add(http.MultipartFile.fromBytes(
@@ -72,11 +81,12 @@ class ApiService {
     }
 
     final streamed = await req.send();
-    final body     = await streamed.stream.bytesToString();
-    final data     = jsonDecode(body) as Map<String, dynamic>;
+    final body = await streamed.stream.bytesToString();
+    final data = jsonDecode(body) as Map<String, dynamic>;
 
     if (streamed.statusCode != 202) {
-      throw Exception(data['error'] ?? 'Upload failed (${streamed.statusCode})');
+      throw Exception(
+          data['error'] ?? 'Upload failed (${streamed.statusCode})');
     }
     return data['job_id'] as String;
   }
@@ -100,15 +110,16 @@ class ApiService {
   }
 
   // ── Convert backend result → Procedure ───────────────────────────────────
-  static Procedure resultToProcedure(Map<String, dynamic> jobData, String title) {
+  static Procedure resultToProcedure(
+      Map<String, dynamic> jobData, String title) {
     final raw = jobData['result'] as Map<String, dynamic>;
     return Procedure(
-      id:            DateTime.now().millisecondsSinceEpoch.toString(),
-      title:         title,
-      surgeonName:   'ORAS Auto-Analysis',
-      date:          DateTime.now(),
-      status:        ProcedureStatus.completed,
-      duration:      Duration(seconds: (raw['duration'] as num).toInt()),
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      title: title,
+      surgeonName: 'ORAS Auto-Analysis',
+      date: DateTime.now(),
+      status: ProcedureStatus.completed,
+      duration: Duration(seconds: (raw['duration'] as num).toInt()),
       phaseTimeline: (raw['phase_timeline'] as List)
           .map((p) => PhaseEntry.fromJson(p as Map<String, dynamic>))
           .toList(),
@@ -117,6 +128,7 @@ class ApiService {
           .toList(),
     );
   }
+
   /// Returns the URL to stream the video for a given job.
   /// Works on all platforms — native uses it too so code is unified.
   static String videoUrl(String jobId) => '$_base/video/$jobId';
@@ -130,7 +142,6 @@ class ApiService {
     } catch (_) {
       return false;
     }
-
   }
   // ── Editing-timeline protection ──────────────────────────────────────────
   // Called by EditTimelineStore whenever a video gains/loses its first/last
